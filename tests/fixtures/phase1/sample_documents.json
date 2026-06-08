@@ -1,0 +1,77 @@
+[
+  {
+    "id": "3dfaf74fad374ae4b779a06e8b15e8f1",
+    "title": "Machine learning - Wikipedia",
+    "metadata": {
+      "snippet": "Machine learning (ML) is a field of study in artificial intelligence concerned with the development and study of statistical algorithms that can learn from data",
+      "search_link": "https://en.wikipedia.org/wiki/Machine_learning",
+      "download_url": "https://en.wikipedia.org/wiki/Machine_learning",
+      "rank": "1"
+    },
+    "media_type": "text/html",
+    "path": "downloaded_files\\20260205-054820_en-wikipedia-org_machine-learning-wikipedia.html",
+    "source_path": "downloaded_files\\20260205-054820_en-wikipedia-org_machine-learning-wikipedia.html",
+    "content": null,
+    "encoding": "utf-8"
+  },
+  {
+    "id": "8e607e205762469a9a04c1a5dc02b549",
+    "title": "What is Machine Learning? | IBM",
+    "metadata": {
+      "snippet": "Machine learning is the subset of artificial intelligence (AI) focused on algorithms that can “learn” the patterns of training data and, subsequently, ...",
+      "search_link": "https://www.ibm.com/think/topics/machine-learning",
+      "download_url": "https://www.ibm.com/think/topics/machine-learning",
+      "rank": "2"
+    },
+    "media_type": "text/html",
+    "path": "downloaded_files\\20260205-054820_www-ibm-com_what-is-machine-learning-ibm.html",
+    "source_path": "downloaded_files\\20260205-054820_www-ibm-com_what-is-machine-learning-ibm.html",
+    "content": null,
+    "encoding": "utf-8"
+  },
+  {
+    "id": "a4d537013069490380f565dd3281f9b7",
+    "title": "Machine Learning Crash Course - Google for Developers",
+    "metadata": {
+      "snippet": "Google's fast-paced, practical introduction to machine learning, featuring a series of animated videos, interactive visualizations, and hands-on practice ...",
+      "search_link": "https://developers.google.com/machine-learning/crash-course",
+      "download_url": "https://developers.google.com/machine-learning/crash-course",
+      "rank": "3"
+    },
+    "media_type": "text/html",
+    "path": "downloaded_files\\20260205-054820_developers-google-com_machine-learning-crash-course-google-for-developers.html",
+    "source_path": "downloaded_files\\20260205-054820_developers-google-com_machine-learning-crash-course-google-for-developers.html",
+    "content": null,
+    "encoding": "utf-8"
+  },
+  {
+    "id": "a785a31b6d1b4ff189704a2c6bd660bf",
+    "title": "Machine Learning: What it is and why it matters | SAS",
+    "metadata": {
+      "snippet": "Machine learning is a method of data analysis that automates analytical model building. It is a branch of artificial intelligence (AI) & based on the idea that ...",
+      "search_link": "https://www.sas.com/en_us/insights/analytics/machine-learning.html",
+      "download_url": "https://www.sas.com/en_us/insights/analytics/machine-learning.html",
+      "rank": "4"
+    },
+    "media_type": "text/html",
+    "path": "downloaded_files\\20260205-054820_www-sas-com_machine-learning-what-it-is-and-why-it-matters-sas.html",
+    "source_path": "downloaded_files\\20260205-054820_www-sas-com_machine-learning-what-it-is-and-why-it-matters-sas.html",
+    "content": null,
+    "encoding": "utf-8"
+  },
+  {
+    "id": "8e615da332164e35a9b04dc1e2267474",
+    "title": "Machine Learning Tutorial - GeeksforGeeks",
+    "metadata": {
+      "snippet": "Dec 26, 2025 ... Machine learning is a branch of Artificial Intelligence that focuses on developing models and algorithms that let computers learn from data",
+      "search_link": "https://www.geeksforgeeks.org/machine-learning/machine-learning/",
+      "download_url": "https://www.geeksforgeeks.org/machine-learning/machine-learning/",
+      "rank": "5"
+    },
+    "media_type": "text/html",
+    "path": "downloaded_files\\20260205-054820_www-geeksforgeeks-org_machine-learning-tutorial-geeksforgeeks.html",
+    "source_path": "downloaded_files\\20260205-054820_www-geeksforgeeks-org_machine-learning-tutorial-geeksforgeeks.html",
+    "content": null,
+    "encoding": "utf-8"
+  }
+]
