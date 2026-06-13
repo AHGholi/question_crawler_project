@@ -25,6 +25,7 @@ Orchestration: `MainPipeline` ([main_pipeline.py](main_pipeline.py)) iterates `C
 | **Extract** | `extractor/html_extractor.py`, `extractor/pdf_extractor.py`, `extractor/cleaner.py` | Parse formats, clean text |
 | **Rank & Process** | `processor/pipeline.py`, `processor/sentence_ranking.py`, `processor/vectorizer.py` | Score sentences, vectorize, compute similarity |
 | **Question Gen** | `question_generator/generator.py`, `question_generator/neural_qg.py`, `rule_based_QEngine/*` | **[DEPRECATED]** To be replaced; see note below. |
+| **Legacy Generator Code** | `question_generator_old/` | legacy question generation implementation; kept for reference only and not used by current runtime |
 | **Config & Logging** | `utils/config.py`, `utils/logger.py`, `utils/models.py` | YAML config loading, centralized logging, data models |
 
 ## Configuration & Workflows
@@ -47,7 +48,8 @@ Orchestration: `MainPipeline` ([main_pipeline.py](main_pipeline.py)) iterates `C
 
 ## ⚠️ Important: Question Generator Deprecation
 
-The `question_generator/` module **will be deleted and replaced with an external library**. 
+The `question_generator/` module **will be deleted and replaced with an external library**.
+`question_generator_old/` remains in the repo for reference only and is not part of the current execution path.
 
 **Impact on new work**:
 - Do NOT expand the neural_qg or rule_based_QEngine logic.

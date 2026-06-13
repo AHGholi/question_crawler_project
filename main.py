@@ -106,3 +106,35 @@ def build_processor_pipeline() -> ProcessorPipeline:
         summarizer=None,
         question_generator=question_generator,
     )
+
+
+def run_main_pipeline(
+    query: str,
+    max_results: int = 5,
+    limit: Optional[int] = None,
+) -> MainPipelineResult:
+    pipeline = MainPipeline(
+        crawler=build_crawler(query, max_results=max_results),
+        processor=build_processor_pipeline(),
+    )
+    return pipeline.run(limit=limit)
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    parser = argparse.ArgumentParser(description="Run the exam crawler pipeline")
+    parser.add_argument("query", help="Search query")
+    parser.add_argument("--max-results", type=int, default=5, help="Maximum search results")
+    parser.add_argument("--limit", type=int, default=0, help="Document processing limit (0 = no limit)")
+    args = parser.parse_args()
+
+    limit_arg = None if args.limit == 0 else args.limit
+    result = run_main_pipeline(query=args.query, max_results=args.max_results, limit=limit_arg)
+
+    print("Processed documents:", result.stats.processed_documents)
+    print("Failed documents:", result.stats.failed_documents)
+    print("Total questions:", result.stats.total_questions)
+    if result.stats.failed_documents:
+        for ctx in result.contexts:
+            if ctx.errors:
+                print(f"- {ctx.document.id}: {ctx.errors}")

@@ -356,3 +356,24 @@ class NeuralQuestionGenerator:
             return float(value)
         except (TypeError, ValueError):
             return fallback
+
+
+class RuleBasedQuestionGenerator:
+    """Placeholder rule-based generator.
+
+    This is a minimal stub so the existing import path resolves.
+    Actual rule-based generation is intentionally deprecated and should be
+    replaced by an external question generation implementation.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    def __call__(
+        self,
+        extraction: ExtractionResult,
+        summary: Optional[str] = None,
+    ) -> Optional[QuestionSet]:
+        if extraction is not None:
+            extraction.questions = []
+        return None
