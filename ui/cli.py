@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from typing import Any, Iterable
 
 from main import run_main_pipeline
 
@@ -11,7 +12,31 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("query", help="Search query")
     parser.add_argument("--max-results", type=int, default=5, help="Maximum search results to crawl")
     parser.add_argument("--limit", type=int, default=0, help="Document processing limit (0 = no limit)")
+    parser.add_argument("--show-qa", action="store_true", help="Print generated question/answer pairs")
     return parser.parse_args()
+
+
+def _question_text(q: Any) -> str:
+    return (getattr(q, "question", None) or getattr(q, "prompt", None) or "").strip()
+
+
+def _question_answer(q: Any) -> str:
+    return (getattr(q, "answer", None) or "").strip()
+
+
+def _iter_questions(ctx: Any) -> Iterable[Any]:
+    if not ctx or not getattr(ctx, "questions", None):
+        return []
+    items = getattr(ctx.questions, "questions", None)
+    return items if items else []
+
+
+def _safe_title(ctx: Any) -> str:
+    doc = getattr(ctx, "document", None)
+    title = getattr(doc, "title", None) if doc else None
+    if title and str(title).strip():
+        return str(title).strip()
+    return f"Document {getattr(doc, 'id', 'unknown')}"
 
 
 def main() -> None:
@@ -23,6 +48,25 @@ def main() -> None:
     print("Processed documents:", result.stats.processed_documents)
     print("Failed documents:", result.stats.failed_documents)
     print("Total questions:", result.stats.total_questions)
+
+    if args.show_qa:
+        print("\nGenerated Q/A:")
+        any_printed = False
+        for i, ctx in enumerate(result.contexts, start=1):
+            qs = list(_iter_questions(ctx))
+            if not qs:
+                continue
+            any_printed = True
+            print(f"\n{i}. {_safe_title(ctx)}")
+            for j, q in enumerate(qs, start=1):
+                q_text = _question_text(q)
+                q_ans = _question_answer(q)
+                print(f"  Q{j}: {q_text}")
+                print(f"  A{j}: {q_ans if q_ans else '[No answer]'}")
+
+        if not any_printed:
+            print("No questions generated.")
+
     if result.stats.failed_documents:
         print("\nFailures:")
         for ctx in result.contexts:

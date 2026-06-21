@@ -1,4 +1,4 @@
-# processor/sentence_ranking.py
+# processor\sentence_ranking.py
 from __future__ import annotations
 
 import math
@@ -12,13 +12,18 @@ from utils.models import ExtractionResult
 
 @dataclass(slots=True)
 class SentenceRankingConfig:
-    top_k: int = 5
+    top_k: int = 10
     minimum_score: float = 0.05
     keyword_weight: float = 3.0
     title_weight: float = 1.5
     position_decay: float = 0.88
     length_penalty_center: int = 20
     length_penalty_sigma: float = 12.0
+
+    # --- new noise control knobs ---
+    min_tokens_per_sentence: int = 5
+    max_tokens_per_sentence: int = 80
+    max_punct_ratio: float = 0.35
 
 
 class SentenceRankingService:
@@ -29,39 +34,60 @@ class SentenceRankingService:
     have their `top_sentences` and `sentence_scores` fields populated.
     """
 
+    # Common website chrome / navigation / UI patterns
+    _NOISE_PATTERNS: tuple[re.Pattern[str], ...] = (
+        re.compile(r"\bskip to (main )?content\b", re.I),
+        re.compile(r"\bmain menu\b", re.I),
+        re.compile(r"\bsign in\b", re.I),
+        re.compile(r"\blog in\b", re.I),
+        re.compile(r"\bcreate account\b", re.I),
+        re.compile(r"\bdonate\b", re.I),
+        re.compile(r"\bprivacy policy\b", re.I),
+        re.compile(r"\bterms of (use|service)\b", re.I),
+        re.compile(r"\bcookie(s)?\b", re.I),
+        re.compile(r"\btable of contents\b", re.I),
+        re.compile(r"\bjump to content\b", re.I),
+        re.compile(r"\brelated changes\b", re.I),
+        re.compile(r"\bpermanent link\b", re.I),
+        re.compile(r"\bprintable version\b", re.I),
+        re.compile(r"\bdownload as pdf\b", re.I),
+        re.compile(r"\bedit (links|view history)\b", re.I),
+        re.compile(r"\btoggle\b", re.I),
+        re.compile(r"\blanguages?\b", re.I),
+    )
+
     def __init__(self, config: SentenceRankingConfig | None = None) -> None:
         self.config = config or SentenceRankingConfig()
 
-    # --- public API ----------------------------------------------------- #
-
     def rank(self, extraction: ExtractionResult) -> ExtractionResult:
-        """
-        Populate `extraction.top_sentences` and `extraction.sentence_scores`.
-        Returns the same object to allow call chaining.
-        """
         if extraction.top_sentences and extraction.sentence_scores:
-            # Already populated – nothing to do.
             return extraction
 
-        sentences = self._split_sentences(
-            extraction.clean_text or extraction.raw_text or ""
-        )
+        source_text = extraction.clean_text or extraction.raw_text or ""
+        sentences = self._split_sentences(source_text)
         if not sentences:
             extraction.top_sentences = []
             extraction.sentence_scores = {}
             return extraction
 
-        token_frequencies = self._document_frequency_model(
-            extraction.clean_text or extraction.raw_text or ""
-        )
+        # 1) de-duplicate while preserving order
+        sentences = self._dedupe_sentences(sentences)
+
+        # 2) remove noisy lines (processor responsibility)
+        filtered_sentences = [s for s in sentences if not self._is_noisy_sentence(s)]
+
+        # If filtering is too aggressive, gracefully fall back to original deduped sentences
+        working_sentences = filtered_sentences if filtered_sentences else sentences
+
+        token_frequencies = self._document_frequency_model(source_text)
         title_tokens = self._tokenize(extraction.document.title or "")
         keyword_tokens = [
             token for keyword in extraction.keywords for token in self._tokenize(keyword)
         ]
         keyword_set = set(keyword_tokens)
 
-        raw_scores = {}
-        for idx, sentence in enumerate(sentences):
+        raw_scores: dict[str, float] = {}
+        for idx, sentence in enumerate(working_sentences):
             tokens = self._tokenize(sentence)
             if not tokens:
                 continue
@@ -79,13 +105,12 @@ class SentenceRankingService:
             )
             composite *= position_bonus * length_penalty
 
-            if composite <= 0:
-                continue
-            raw_scores[sentence] = composite
+            if composite > 0:
+                raw_scores[sentence] = composite
 
         if not raw_scores:
-            # Fall back to the original ordering if everything zeroed out.
-            raw_scores = {sentence: 1.0 for sentence in sentences[: self.config.top_k]}
+            fallback = working_sentences[: self.config.top_k]
+            raw_scores = {s: 1.0 for s in fallback}
 
         normalized_scores = self._normalize_scores(raw_scores)
         top_sentences = self._select_top(normalized_scores)
@@ -95,19 +120,12 @@ class SentenceRankingService:
         return extraction
 
     def rank_batch(self, extractions: Iterable[ExtractionResult]) -> List[ExtractionResult]:
-        """
-        Convenience helper for processing multiple ExtractionResult instances.
-        """
         return [self.rank(extraction) for extraction in extractions]
-
-    # --- scoring helpers ------------------------------------------------ #
 
     def _split_sentences(self, text: str) -> List[str]:
         text = text.strip()
         if not text:
             return []
-
-        # Try to use project tokeniser if available.
         try:
             from processor.helpers import text_processing  # type: ignore
 
@@ -117,49 +135,41 @@ class SentenceRankingService:
             if splitter:
                 sentences = splitter(text)
                 if isinstance(sentences, Sequence):
-                    return [sentence.strip() for sentence in sentences if sentence.strip()]
+                    return [s.strip() for s in sentences if s and s.strip()]
         except Exception:
-            # Fallback handled below.
             pass
 
-        # Regex-based fallback splitting.
         sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9])", text)
-        return [sentence.strip() for sentence in sentences if sentence.strip()]
+        return [s.strip() for s in sentences if s.strip()]
 
     def _tokenize(self, text: str) -> List[str]:
-        text = text.lower()
-        return re.findall(r"[a-z0-9]+", text)
+        return re.findall(r"[a-z0-9]+", text.lower())
 
     def _document_frequency_model(self, text: str) -> Counter:
-        tokens = self._tokenize(text)
-        return Counter(tokens)
+        return Counter(self._tokenize(text))
 
     def _base_frequency_score(self, sentence_tokens: List[str], doc_freq: Counter) -> float:
         if not doc_freq:
             return 0.0
-        return sum(math.log1p(doc_freq[token]) for token in sentence_tokens)
+        return sum(math.log1p(doc_freq[t]) for t in sentence_tokens)
 
     def _keyword_overlap_score(self, sentence_tokens: List[str], keyword_set: set[str]) -> float:
         if not keyword_set:
             return 0.0
-        overlap = sum(1 for token in sentence_tokens if token in keyword_set)
-        return overlap / len(keyword_set)
+        overlap = sum(1 for t in sentence_tokens if t in keyword_set)
+        return overlap / max(1, len(keyword_set))
 
     def _title_overlap_score(self, sentence_tokens: List[str], title_tokens: List[str]) -> float:
-        if not title_tokens:
-            return 0.0
         title_set = set(title_tokens)
         if not title_set:
             return 0.0
-        overlap = sum(1 for token in sentence_tokens if token in title_set)
+        overlap = sum(1 for t in sentence_tokens if t in title_set)
         return overlap / len(title_set)
 
     def _position_score(self, sentence_idx: int) -> float:
-        decay = self.config.position_decay
-        return math.pow(decay, sentence_idx)
+        return math.pow(self.config.position_decay, sentence_idx)
 
     def _length_penalty(self, sentence_length: int) -> float:
-        # Gaussian around the preferred sentence length.
         center = self.config.length_penalty_center
         sigma = self.config.length_penalty_sigma
         exponent = -((sentence_length - center) ** 2) / (2 * sigma**2)
@@ -167,17 +177,58 @@ class SentenceRankingService:
 
     def _normalize_scores(self, raw_scores: dict[str, float]) -> dict[str, float]:
         max_score = max(raw_scores.values(), default=0.0)
-        if max_score <= 0.0:
-            return {sentence: self.config.minimum_score for sentence in raw_scores}
-        normalized = {
-            sentence: max(score / max_score, self.config.minimum_score)
-            for sentence, score in raw_scores.items()
+        if max_score <= 0:
+            return {s: self.config.minimum_score for s in raw_scores}
+        return {
+            s: max(score / max_score, self.config.minimum_score)
+            for s, score in raw_scores.items()
         }
-        return normalized
 
     def _select_top(self, normalized_scores: dict[str, float]) -> List[str]:
-        sorted_sentences = sorted(
-            normalized_scores.items(), key=lambda item: item[1], reverse=True
-        )
-        top = [sentence for sentence, _ in sorted_sentences[: self.config.top_k]]
-        return top
+        ranked = sorted(normalized_scores.items(), key=lambda item: item[1], reverse=True)
+        return [s for s, _ in ranked[: self.config.top_k]]
+
+    # -------------------- new helpers -------------------- #
+
+    def _dedupe_sentences(self, sentences: List[str]) -> List[str]:
+        seen: set[str] = set()
+        out: List[str] = []
+        for s in sentences:
+            key = re.sub(r"\s+", " ", s.strip().lower())
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            out.append(s.strip())
+        return out
+
+    def _is_noisy_sentence(self, sentence: str) -> bool:
+        s = sentence.strip()
+        if not s:
+            return True
+
+        # Pattern-based UI/nav filtering
+        for pat in self._NOISE_PATTERNS:
+            if pat.search(s):
+                return True
+
+        tokens = self._tokenize(s)
+        n = len(tokens)
+        if n < self.config.min_tokens_per_sentence:
+            return True
+        if n > self.config.max_tokens_per_sentence:
+            return True
+
+        # punctuation-heavy heuristic
+        punct_count = len(re.findall(r"[^\w\s]", s))
+        ratio = punct_count / max(1, len(s))
+        if ratio > self.config.max_punct_ratio:
+            return True
+
+        # Looks like language menu / link farm (many short capitalized chunks)
+        chunks = re.split(r"[|/•·,;]\s*", s)
+        if len(chunks) >= 8:
+            short_chunks = sum(1 for c in chunks if 0 < len(c.strip()) <= 12)
+            if short_chunks / len(chunks) > 0.7:
+                return True
+
+        return False

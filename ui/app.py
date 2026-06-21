@@ -1,323 +1,310 @@
-# ui/app.py
+# ui\app.py
 
-import os
-import sys
-import yaml
-from pathlib import Path
-
-# Add project root (parent of /ui) to Python path
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-
-# Load Google credentials from config.yaml (project root)
-CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.yaml"
-if CONFIG_PATH.exists():
-    with CONFIG_PATH.open("r", encoding="utf-8") as f:
-        cfg = yaml.safe_load(f) or {}
-
-    google_cfg = cfg.get("google", {})
-    if "GOOGLE_API_KEY" not in os.environ:
-        os.environ["GOOGLE_API_KEY"] = google_cfg.get("api_key", "")
-    if "GOOGLE_CSE_ID" not in os.environ and "GOOGLE_CSE_CX" not in os.environ:
-        os.environ["GOOGLE_CSE_ID"] = google_cfg.get("cse_id", "") or google_cfg.get("cse_cx", "")
-
-
+from __future__ import annotations
 
 import io
-import logging
-from contextlib import contextmanager
-from typing import Optional
+import json
+import traceback
+from typing import Any, Iterable, Optional
 
 import streamlit as st
-from docx import Document
-from reportlab.lib.pagesizes import letter
+from docx import Document as DocxDocument
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
+
+import sys
+from pathlib import Path
+
+# Ensure project root is on PYTHONPATH when running `streamlit run ui/app.py`
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from main import run_main_pipeline
 from main_pipeline import MainPipelineResult
 from processor.pipeline import PipelineContext
-from utils.models import QuestionSet
 
 
-@contextmanager
-def capture_logs(level: int = logging.INFO):
-    """
-    Capture all root logger output into a buffer.
-    """
-    logger = logging.getLogger()
-    buffer = io.StringIO()
-    handler = logging.StreamHandler(buffer)
-    handler.setLevel(level)
-    formatter = logging.Formatter("%(asctime)s — %(levelname)s — %(message)s", "%H:%M:%S")
-    handler.setFormatter(formatter)
 
-    logger.addHandler(handler)
-    logger.setLevel(level)
+# -----------------------------
+# Compatibility helpers
+# -----------------------------
+def _question_text(q: Any) -> str:
+    # Supports QuestionItem(question=...) and Question(prompt=...)
+    return (getattr(q, "question", None) or getattr(q, "prompt", None) or "").strip()
 
+
+def _question_answer(q: Any) -> str:
+    return (getattr(q, "answer", None) or "").strip()
+
+
+def _question_metadata(q: Any) -> dict:
+    md = getattr(q, "metadata", None)
+    return md if isinstance(md, dict) else {}
+
+
+def _iter_questions(ctx: PipelineContext) -> Iterable[Any]:
+    if not ctx or not ctx.questions:
+        return []
+    items = getattr(ctx.questions, "questions", None)
+    return items if items else []
+
+
+def _safe_title(ctx: PipelineContext) -> str:
+    title = getattr(ctx.document, "title", None) if ctx and ctx.document else None
+    if title and str(title).strip():
+        return str(title).strip()
+    return f"Document {getattr(ctx.document, 'id', 'unknown')}"
+
+
+# -----------------------------
+# Export helpers
+# -----------------------------
+def question_set_to_docx(contexts: list[PipelineContext]) -> bytes:
+    doc = DocxDocument()
+    doc.add_heading("Generated Questions", level=1)
+
+    total = 0
+    for i, ctx in enumerate(contexts, start=1):
+        qs = list(_iter_questions(ctx))
+        if not qs:
+            continue
+
+        doc.add_heading(f"{i}. {_safe_title(ctx)}", level=2)
+        for j, q in enumerate(qs, start=1):
+            text = _question_text(q)
+            ans = _question_answer(q)
+            md = _question_metadata(q)
+
+            doc.add_paragraph(f"Q{j}. {text}")
+            if ans:
+                doc.add_paragraph(f"Answer: {ans}")
+            if md:
+                doc.add_paragraph(f"Metadata: {json.dumps(md, ensure_ascii=False)}")
+            total += 1
+
+    if total == 0:
+        doc.add_paragraph("No questions generated.")
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def question_set_to_pdf(contexts: list[PipelineContext]) -> bytes:
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    width, height = A4
+    x_margin = 40
+    y = height - 40
+    line_h = 16
+
+    # Optional Unicode font registration fallback
     try:
-        yield buffer
-    finally:
-        logger.removeHandler(handler)
+        pdfmetrics.registerFont(TTFont("DejaVu", "DejaVuSans.ttf"))
+        c.setFont("DejaVu", 11)
+    except Exception:
+        c.setFont("Helvetica", 11)
+
+    def write_line(text: str = ""):
+        nonlocal y
+        if y < 40:
+            c.showPage()
+            try:
+                c.setFont("DejaVu", 11)
+            except Exception:
+                c.setFont("Helvetica", 11)
+            y = height - 40
+        c.drawString(x_margin, y, text[:1300])  # hard cap
+        y -= line_h
+
+    write_line("Generated Questions")
+    write_line("-" * 40)
+
+    total = 0
+    for i, ctx in enumerate(contexts, start=1):
+        qs = list(_iter_questions(ctx))
+        if not qs:
+            continue
+
+        write_line(f"{i}. {_safe_title(ctx)}")
+        for j, q in enumerate(qs, start=1):
+            text = _question_text(q)
+            ans = _question_answer(q)
+            md = _question_metadata(q)
+
+            write_line(f"  Q{j}. {text}")
+            if ans:
+                write_line(f"     Answer: {ans}")
+            if md:
+                write_line(f"     Metadata: {json.dumps(md, ensure_ascii=False)}")
+            total += 1
+        write_line("")
+
+    if total == 0:
+        write_line("No questions generated.")
+
+    c.save()
+    buf.seek(0)
+    return buf.getvalue()
 
 
-def question_set_to_docx(qset: QuestionSet) -> bytes:
-    document = Document()
-    document.add_heading("Generated Questions", level=1)
+# -----------------------------
+# UI Rendering
+# -----------------------------
+def render_context(ctx: PipelineContext, idx: int) -> None:
+    title = _safe_title(ctx)
+    with st.expander(f"{idx}. {title}", expanded=False):
+        if ctx.errors:
+            st.error("Errors:")
+            for err in ctx.errors:
+                st.code(err)
 
-    document.add_paragraph(f"Document ID: {qset.document.id}")
-    if qset.strategy:
-        document.add_paragraph(f"Strategy: {qset.strategy}")
+        extraction = ctx.extraction
+        if extraction:
+            clean_len = len((getattr(extraction, "clean_text", "") or "").strip())
+            kws = getattr(extraction, "keywords", None) or []
+            top_sents = getattr(extraction, "top_sentences", None) or []
+            st.caption(
+                f"clean_text_len={clean_len} | keywords={len(kws)} | top_sentences={len(top_sents)}"
+            )
 
-    document.add_heading("Questions", level=2)
+        qs = list(_iter_questions(ctx))
+        if not qs:
+            st.info("No questions generated for this document.")
+            return
 
-    for idx, question in enumerate(qset.questions, start=1):
-        p = document.add_paragraph(style="List Number")
-        p.add_run(f"{idx}. {question.prompt}")
+        for q_idx, q in enumerate(qs, start=1):
+            q_text = _question_text(q)
+            q_ans = _question_answer(q)
+            q_md = _question_metadata(q)
 
-        if question.answer:
-            document.add_paragraph(f"Answer: {question.answer}")
-
-        if question.metadata:
-            metadata_paragraph = document.add_paragraph("Metadata:")
-            for key, value in question.metadata.items():
-                metadata_paragraph.add_run(f"\n - {key}: {value}")
-
-    buffer = io.BytesIO()
-    document.save(buffer)
-    buffer.seek(0)
-    return buffer.getvalue()
-
-
-def question_set_to_pdf(qset: QuestionSet) -> bytes:
-    buffer = io.BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=letter)
-    width, height = letter
-
-    y = height - 50
-    pdf.setFont("Helvetica-Bold", 16)
-    pdf.drawString(50, y, "Generated Questions")
-    y -= 30
-
-    pdf.setFont("Helvetica", 12)
-    pdf.drawString(50, y, f"Document ID: {qset.document.id}")
-    y -= 20
-
-    if qset.strategy:
-        pdf.drawString(50, y, f"Strategy: {qset.strategy}")
-        y -= 20
-
-    pdf.setFont("Helvetica-Bold", 14)
-    pdf.drawString(50, y, "Questions")
-    y -= 30
-
-    pdf.setFont("Helvetica", 11)
-    line_height = 18
-
-    for idx, question in enumerate(qset.questions, start=1):
-        pdf.drawString(60, y, f"{idx}. {question.prompt}")
-        y -= line_height
-
-        if question.answer:
-            pdf.drawString(60, y, f"Answer: {question.answer}")
-            y -= line_height
-
-        if question.metadata:
-            pdf.drawString(60, y, "Metadata:")
-            y -= line_height
-            for key, value in question.metadata.items():
-                pdf.drawString(80, y, f"{key}: {value}")
-                y -= line_height
-
-        y -= line_height
-
-        if y < 80:
-            pdf.showPage()
-            pdf.setFont("Helvetica", 11)
-            y = height - 50
-
-    pdf.save()
-    buffer.seek(0)
-    return buffer.getvalue()
-
-
-def render_context(ctx: PipelineContext):
-    st.subheader("Document details")
-    st.write(f"Document ID: {ctx.document.id}")
-    if ctx.document.title:
-        st.write(f"Title: {ctx.document.title}")
-
-    if ctx.errors:
-        st.error("This document failed:")
-        for err in ctx.errors:
-            st.write(f"- {err}")
-        return
-
-    if getattr(ctx, "summary", None):
-        st.subheader("Summary")
-        st.write(ctx.summary)
-    else:
-        st.info("No summary (summarizer not implemented yet).")
-
-    if ctx.questions and ctx.questions.questions:
-        qset = ctx.questions
-        st.subheader("Generated Questions")
-
-        for idx, q in enumerate(qset.questions, start=1):
-            st.markdown(f"**{idx}. {q.prompt}**")
-            if q.answer:
-                st.write(f"Answer: {q.answer}")
-            if q.metadata:
+            st.markdown(f"**Q{q_idx}. {q_text}**")
+            if q_ans:
+                st.write(f"Answer: {q_ans}")
+            if q_md:
                 with st.expander("Metadata", expanded=False):
-                    st.json(q.metadata)
+                    st.json(q_md)
 
-        st.divider()
-        col1, col2 = st.columns(2)
 
-        with col1:
-            st.download_button(
-                label="Download Word (.docx)",
-                data=question_set_to_docx(qset),
-                file_name=f"questions_{ctx.document.id}.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            )
+def _stats_block(result: MainPipelineResult) -> None:
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total documents", result.stats.total_documents)
+    col2.metric("Processed", result.stats.processed_documents)
+    col3.metric("Failed", result.stats.failed_documents)
+    col4.metric("Total questions", result.stats.total_questions)
 
-        with col2:
-            st.download_button(
-                label="Download PDF",
-                data=question_set_to_pdf(qset),
-                file_name=f"questions_{ctx.document.id}.pdf",
-                mime="application/pdf",
-            )
-    else:
-        st.warning("No questions generated for this document.")
 
-def main():
-    st.set_page_config(page_title="Question Generator", page_icon="❓", layout="wide")
-    st.title("Question Generation Pipeline")
+# -----------------------------
+# Main app
+# -----------------------------
+def main() -> None:
+    st.set_page_config(page_title="Question Generator", layout="wide")
+    st.title("Document Question Generator")
 
-    st.markdown(
-        """
-        Enter a query to crawl documents, extract text, rank sentences, and generate questions.
-        Results are displayed per document.
-        """
-    )
+    with st.sidebar:
+        st.header("Run settings")
+        query = st.text_input("Query", value="machine learning basics")
+        max_results = st.number_input("Max search results", min_value=1, max_value=50, value=5, step=1)
+        limit = st.number_input("Process limit (0 = no limit)", min_value=0, max_value=100, value=0, step=1)
+        run_btn = st.button("Run pipeline", type="primary")
 
-    # --- Session state defaults ---
-    if "result" not in st.session_state:
-        st.session_state.result = None
-    if "logs" not in st.session_state:
-        st.session_state.logs = ""
-    if "selected_idx" not in st.session_state:
-        st.session_state.selected_idx = 0
+    if "last_result" not in st.session_state:
+        st.session_state["last_result"] = None
+    if "last_error" not in st.session_state:
+        st.session_state["last_error"] = None
 
-    # --- Input form (prevents rerun on each widget change) ---
-    with st.form("run_form"):
-        query = st.text_input(
-            "Search query",
-            placeholder="e.g. climate change impacts on coral reefs",
-            key="query",
-        )
-        max_results = st.number_input(
-            "Max search results",
-            min_value=1,
-            max_value=20,
-            value=5,
-            step=1,
-            key="max_results",
-        )
-        limit = st.number_input(
-            "Process limit (after crawling)",
-            min_value=0,
-            max_value=20,
-            value=0,
-            step=1,
-            key="limit",
-        )
-
-        submitted = st.form_submit_button("Run pipeline", type="primary")
-
-    # --- Run pipeline only on submit ---
-    if submitted:
-        if not query.strip():
-            st.warning("Please enter a query.")
-            st.stop()
-
-        limit_arg = None if limit == 0 else int(limit)
-
+    if run_btn:
+        st.session_state["last_error"] = None
         with st.spinner("Running pipeline..."):
-            with capture_logs() as log_buffer:
-                try:
-                    pipeline_result: MainPipelineResult = run_main_pipeline(
-                    query=query,
+            try:
+                limit_arg: Optional[int] = None if int(limit) == 0 else int(limit)
+                result = run_main_pipeline(
+                    query=query.strip(),
                     max_results=int(max_results),
                     limit=limit_arg,
                 )
+                st.session_state["last_result"] = result
+            except Exception as exc:
+                st.session_state["last_result"] = None
+                st.session_state["last_error"] = f"{exc}\n\n{traceback.format_exc()}"
 
-                    logs = log_buffer.getvalue()
-                except Exception as exc:
-                    logs = log_buffer.getvalue()
-                    st.error(f"Pipeline failed: {exc}")
-                    if logs:
-                        st.subheader("Logs")
-                        st.code(logs, language="text")
-                    st.stop()
+    if st.session_state["last_error"]:
+        st.error("Pipeline failed")
+        st.code(st.session_state["last_error"])
+        return
 
-        # Persist outputs across reruns
-        st.session_state.result = pipeline_result
-        st.session_state.logs = logs
-        st.session_state.selected_idx = 0
+    result: MainPipelineResult | None = st.session_state["last_result"]
+    if not result:
+        st.info("Set your query and click **Run pipeline**.")
+        return
 
-        st.success("Pipeline completed.")
+    _stats_block(result)
 
-    # --- Display persisted results ---
-    result = st.session_state.result
-    logs = st.session_state.logs
+    st.divider()
+    st.subheader("Per-document results")
+    if not result.contexts:
+        st.warning("No documents returned.")
+    else:
+        for i, ctx in enumerate(result.contexts, start=1):
+            render_context(ctx, i)
 
-    if result:
-        st.subheader("Summary")
-        st.write(f"Total documents seen: {result.stats.total_documents}")
-        st.write(f"Processed: {result.stats.processed_documents}")
-        st.write(f"Failed: {result.stats.failed_documents}")
-        st.write(f"Total questions: {result.stats.total_questions}")
+    st.divider()
+    st.subheader("Export")
 
-        result: Optional[MainPipelineResult] = st.session_state.result
-        if result is None:
-            st.info("Run the pipeline to see results.")
-            return
+    contexts_with_questions = [
+        c for c in result.contexts if c.questions and getattr(c.questions, "questions", None)
+    ]
 
+    c1, c2, c3 = st.columns([1, 1, 2])
 
-        if not result.contexts:
-            st.warning("No documents were processed.")
-        else:
-            st.subheader("Select a document result")
+    with c1:
+        docx_bytes = question_set_to_docx(contexts_with_questions)
+        st.download_button(
+            "Download DOCX",
+            data=docx_bytes,
+            file_name="generated_questions.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            disabled=len(contexts_with_questions) == 0,
+        )
 
-            labels = [
-                f"{i+1}. {ctx.document.title or '(untitled)'} — {ctx.document.id}"
-                for i, ctx in enumerate(result.contexts)
-            ]
+    with c2:
+        pdf_bytes = question_set_to_pdf(contexts_with_questions)
+        st.download_button(
+            "Download PDF",
+            data=pdf_bytes,
+            file_name="generated_questions.pdf",
+            mime="application/pdf",
+            disabled=len(contexts_with_questions) == 0,
+        )
 
-            # Clamp index in case list size changed
-            if st.session_state.selected_idx >= len(labels):
-                st.session_state.selected_idx = 0
-
-            selected_idx = st.selectbox(
-                "Document",
-                list(range(len(labels))),
-                format_func=lambda i: labels[i],
-                index=st.session_state.selected_idx,
-                key="selected_idx_selectbox",
+    with c3:
+        raw = []
+        for ctx in contexts_with_questions:
+            raw.append(
+                {
+                    "document_id": getattr(ctx.document, "id", None),
+                    "title": _safe_title(ctx),
+                    "questions": [
+                        {
+                            "question": _question_text(q),
+                            "answer": _question_answer(q),
+                            "metadata": _question_metadata(q),
+                        }
+                        for q in _iter_questions(ctx)
+                    ],
+                }
             )
-
-            st.session_state.selected_idx = selected_idx
-            render_context(result.contexts[selected_idx])
-
-        st.subheader("Execution logs")
-        if logs:
-            st.code(logs, language="text")
-        else:
-            st.write("No logs emitted.")
+        st.download_button(
+            "Download JSON",
+            data=json.dumps(raw, ensure_ascii=False, indent=2).encode("utf-8"),
+            file_name="generated_questions.json",
+            mime="application/json",
+            disabled=len(contexts_with_questions) == 0,
+        )
 
 
 if __name__ == "__main__":

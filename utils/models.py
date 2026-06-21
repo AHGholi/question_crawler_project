@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 
 @dataclass(slots=True)
@@ -14,7 +14,7 @@ class DocumentRecord:
     metadata: dict[str, str] = field(default_factory=dict)
     media_type: str | None = None
     path: Path | None = None
-    source_path: Path | None = None
+    source_path: Path | None = None 
     content: str | None = None
     encoding: str | None = None
 
@@ -62,7 +62,8 @@ class ExtractionResult:
     top_sentences: List[str] = field(default_factory=list)
     sentence_scores: Dict[str, float] = field(default_factory=dict)
 
-    questions: List[QuestionItem] = field(default_factory=list)
+    questions: List["QuestionItem"] = field(default_factory=list)
+
 
     @property
     def document_id(self) -> str:
@@ -80,7 +81,7 @@ class Question:
 @dataclass(slots=True)
 class QuestionSet:
     document: DocumentRecord
-    questions: List[Question] = field(default_factory=list)
+    questions: List[Union["Question", "QuestionItem"]] = field(default_factory=list)
     generated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     strategy: Optional[str] = None
 

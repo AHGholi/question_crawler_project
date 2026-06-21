@@ -3,6 +3,9 @@ import pytest
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+load_dotenv()
+
 @pytest.fixture
 def temp_output_dir(tmp_path: Path):
     return tmp_path / "downloads"

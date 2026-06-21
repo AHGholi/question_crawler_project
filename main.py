@@ -1,18 +1,32 @@
+# main.py
+
 from __future__ import annotations
 
 import argparse
 import logging
+import os
 from pathlib import Path
 from typing import Iterator, Optional
 from uuid import uuid4
 
+from dotenv import load_dotenv
+
 from crawler.search import run_search
 from extractor.html_extractor import HTMLExtractor
+
 from main_pipeline import MainPipeline, MainPipelineResult, PipelineContext
 from processor.pipeline import ProcessorPipeline
 from processor.sentence_ranking import SentenceRankingService
-from question_generator.generator import NeuralQuestionGenerator
+from question_generator.adapter import PipelineQuestionGenerator
+from question_generator.hf_qg import HFQuestionGenerator
+from utils.config import get_setting
 from utils.models import DocumentRecord, ExtractionResult
+
+import logging
+logging.basicConfig(level=logging.INFO)
+
+# Load environment variables once at startup
+load_dotenv()
 
 
 def crawl_documents(query: str, max_results: int) -> Iterator[DocumentRecord]:
@@ -86,13 +100,57 @@ def build_crawler(query: str, max_results: int):
     return _crawler
 
 
+def build_question_generator() -> Optional[PipelineQuestionGenerator]:
+    qg_enabled = get_setting("question_generator", "enabled", default=True)
+    if not qg_enabled:
+        logging.info("Question generation disabled via config.")
+        return None
+
+    provider = str(get_setting("question_generator", "provider", default="local_hf")).lower().strip()
+    num_questions = int(get_setting("question_generator", "num_questions", default=10))
+    model = str(get_setting("question_generator", "model", default="google/flan-t5-small"))
+    temperature = float(get_setting("question_generator", "temperature", default=0.0))
+    max_new_tokens = int(get_setting("question_generator", "max_new_tokens", default=64))
+    do_sample = bool(get_setting("question_generator", "do_sample", default=False))
+
+    if provider == "local_hf":
+        from question_generator.local_hf_qg import LocalHFQuestionGenerator
+
+        backend = LocalHFQuestionGenerator(
+            model_name=model,
+            temperature=temperature,
+            max_new_tokens=max_new_tokens,
+            do_sample=do_sample,
+        )
+        return PipelineQuestionGenerator(backend=backend, default_num_questions=num_questions)
+
+    if provider == "huggingface":
+        token_env = get_setting("question_generator", "hf_api_token_env", default="HF_API_TOKEN")
+        hf_token = os.getenv(token_env)
+        if not hf_token:
+            raise RuntimeError(f"Missing Hugging Face token. Set env var {token_env} in your .env file.")
+
+        timeout = int(get_setting("question_generator", "timeout", default=60))
+        backend = HFQuestionGenerator(
+            api_token=hf_token,
+            model=model,
+            timeout=timeout,
+            temperature=temperature,
+            max_new_tokens=max_new_tokens,
+        )
+        return PipelineQuestionGenerator(backend=backend, default_num_questions=num_questions)
+
+    raise ValueError(f"Unsupported question generator provider: {provider}")
+
+
+
 def build_processor_pipeline() -> ProcessorPipeline:
     """
     Assemble the ProcessorPipeline with extraction, ranking, and question generation.
     """
     html_extractor = HTMLExtractor()
     ranking_service = SentenceRankingService()
-    question_generator = NeuralQuestionGenerator()
+    question_generator = build_question_generator()
 
     def extractor_step(document: DocumentRecord) -> ExtractionResult:
         if not html_extractor.supports(document):

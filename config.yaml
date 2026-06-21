@@ -1,42 +1,26 @@
-#config.yaml
+# config.yaml
 crawler:
   max_workers: 4
   download_dir: downloaded_files
   crawl_delay_seconds: 0.35
-  max_download_bytes: 10485760  # 10 MB
+  max_download_bytes: 10485760
   allowed_domains: []
-  denied_extensions:
-    - .jpg
-    - .jpeg
-    - .png
+  denied_extensions: [".jpg", ".jpeg", ".png"]
   user_agent: exam_crawler/1.0
 
 google:
-  api_key: "AIzaSyB6GH6ueg8Br0TRIFj8yi8kPoUalki34ww"
-  cse_id: d78eee171e3db4e13
+  api_key_env: GOOGLE_API_KEY
+  cse_id_env: GOOGLE_CSE_ID
   per_page: 10
   max_start_index: 91
 
-
 question_generator:
-  strategy: neural
-  strategies:
-    - neural
-  max_questions: 10
-  min_questions: 0
-  min_sentence_score: 0.45
-  max_keywords_per_question: 2
-  answer_max_chars: 280
-  confidence_decay: 0.1
-
-  model_name: valhalla/t5-base-qg-hl
-  input_format: highlight
-  device: auto
-  max_input_length: 256
-  max_output_length: 64
-  max_keyword_candidates: 20
-  num_beams: 2
-  num_return_sequences: 1
-  temperature: 1.0
-  top_p: 1.0
-  max_answers_per_sentence: 2
+  enabled: true
+  provider: local_hf            # important: not "huggingface" API
+  model: google/flan-t5-large   # current env-safe model
+  num_questions: 10
+  device: -1  
+  max_new_tokens: 160           # lower for cleaner output
+  temperature: 0.2              # deterministic with do_sample false
+  do_sample: false
+  hf_token_env: HF_TOKEN        # optional for download speed/rate

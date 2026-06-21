@@ -1,98 +1,68 @@
-# extractor/html_extractor.py
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Optional, Sequence
+import re
+from html import unescape
+from typing import List
+
+from bs4 import BeautifulSoup
 
 from utils.models import DocumentRecord, ExtractionResult
 
-from .base import BaseExtractor, register_extractor
-from .cleaner import clean_text, strip_html_tags
-from .keyword_extractor import KeywordExtractor 
 
-
-class HTMLExtractor(BaseExtractor):
-    name = "html"
-
-    SUPPORTED_MEDIA_TYPES = {"text/html", "application/xhtml+xml"}
-    SUPPORTED_EXTENSIONS = {".html", ".htm", ".xhtml"}
-
-    def __init__(
-        self,
-        *,
-        encoding: str = "utf-8",
-        errors: str = "ignore",
-        keep_tags: Optional[Sequence[str]] = None,
-        lowercase: bool = False,
-        collapse_to: str = " ",
-        # Keyword extraction tuning
-        use_bigrams: bool = True,
-        threshold_fraction: float = 0.6,
-        min_top_k: int = 10,
-        max_terms: int = 200,
-        title_boost: float = 0.20,
-        bigram_boost: float = 1.5,
-    ) -> None:
-        self.encoding = encoding
-        self.errors = errors
-        self.keep_tags = keep_tags
-        self.lowercase = lowercase
-        self.collapse_to = collapse_to
-
-        # Instantiate keyword extractor with tunable params
-        self.keyword_extractor = KeywordExtractor(
-            use_bigrams=use_bigrams,
-            threshold_fraction=threshold_fraction,
-            min_top_k=min_top_k,
-            max_terms=max_terms,
-            title_boost=title_boost,
-            bigram_boost=bigram_boost,
-        )
+class HTMLExtractor:
+    _WS_RE = re.compile(r"\s+")
 
     def supports(self, document: DocumentRecord) -> bool:
-        media_type = (document.media_type or "").lower()
-        if media_type in self.SUPPORTED_MEDIA_TYPES:
-            return True
-
-        path = document.path or document.source_path
-        if path is None:
-            return False
-        return path.suffix.lower() in self.SUPPORTED_EXTENSIONS
+        mt = (document.media_type or "").lower()
+        path = str(document.path or document.source_path or "").lower()
+        return "html" in mt or path.endswith(".html") or path.endswith(".htm")
 
     def extract(self, document: DocumentRecord) -> ExtractionResult:
-        path = self._resolve_path(document)
-        if not path.is_file():
-            raise FileNotFoundError(f"HTML source not found: {path}")
+        html = document.content or ""
 
-        raw_html = path.read_text(encoding=self.encoding, errors=self.errors)
-        raw_text = strip_html_tags(raw_html, keep_tags=self.keep_tags)
-        cleaned_text = clean_text(
-            raw_html,
-            strip_html=True,
-            keep_tags=self.keep_tags,
-            lowercase=self.lowercase,
-            collapse_to=self.collapse_to,
-        )
+        # If content was not preloaded, try reading from file path
+        if not html:
+            p = document.path or document.source_path
+            if p is not None and p.exists():
+                html = p.read_text(encoding=document.encoding or "utf-8", errors="ignore")
 
-        kw_result = self.keyword_extractor.run(cleaned_text, title=document.title)
+        soup = BeautifulSoup(html, "html.parser")
 
-        return ExtractionResult(
+        # Minimal removal only (not aggressive)
+        for t in ("script", "style", "noscript"):
+            for node in soup.find_all(t):
+                node.decompose()
+
+        raw_text = self._clean_text(soup.get_text(" ", strip=True))
+        clean_text = raw_text  # processor can do ranking/denoise later
+
+        # Lightweight sentence split for downstream components
+        top_sentences = self._split_sentences(clean_text)[:50]
+
+        # Keep extraction permissive
+        result = ExtractionResult(
             document=document,
             raw_text=raw_text,
-            clean_text=cleaned_text,
-            tokens=kw_result.tokens,
-            keywords=kw_result.keywords,
-            keyword_scores=kw_result.scores,  # NEW
+            clean_text=clean_text,
+            summary=(top_sentences[0] if top_sentences else None),
+            top_sentences=top_sentences,
+            keywords=[],
+            tokens=[],
+            entities=[],
+            keyword_scores={},
+            errors=[],
         )
+        return result
 
-    @staticmethod
-    def _resolve_path(document: DocumentRecord) -> Path:
-        path = document.path or document.source_path
-        if path is None:
-            raise ValueError("DocumentRecord.path or source_path must be set for HTML extraction.")
-        return path
+    def _split_sentences(self, text: str) -> List[str]:
+        if not text:
+            return []
+        parts = re.split(r"(?<=[.!?])\s+", text)
+        return [p.strip() for p in parts if len(p.strip()) >= 20]
 
-
-register_extractor(HTMLExtractor.name, HTMLExtractor)
-
-__all__ = ["HTMLExtractor"]
+    @classmethod
+    def _clean_text(cls, text: str) -> str:
+        t = unescape(text or "")
+        t = t.replace("\xa0", " ")
+        t = cls._WS_RE.sub(" ", t).strip()
+        return t

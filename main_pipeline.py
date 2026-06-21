@@ -1,4 +1,5 @@
 # main_pipeline.py
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -6,6 +7,9 @@ from typing import Callable, Iterable, List, Optional, Protocol
 
 from processor.pipeline import PipelineContext, ProcessorPipeline
 from utils.models import DocumentRecord
+
+from dotenv import load_dotenv
+load_dotenv()
 
 
 class CrawlStep(Protocol):
