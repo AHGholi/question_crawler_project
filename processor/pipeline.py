@@ -90,10 +90,17 @@ class ProcessorPipeline:
                 qset = self.question_generator(ctx.extraction, ctx.summary)
                 if qset and qset.questions:
                     ctx.questions = qset
+                    # Keep canonical QA attached to extraction as well
+                    ctx.extraction.questions = qset.questions
                 else:
                     ctx.questions = None
+                    ctx.extraction.questions = []
             except Exception as exc:
                 ctx.add_error(f"question_generation_failed: {exc}")
+                # ensure deterministic empty state
+                if ctx.extraction:
+                    ctx.extraction.questions = []
+
 
 
         return ctx

@@ -61,7 +61,7 @@ class TextProcessor:
         Tokenize text using spaCy.
         Returns a list of token objects.
         """
-        doc = _nlp(text)
+        doc = self.nlp(text)
         return [token for token in doc]
 
     def lemmatize_tokens(self, tokens):

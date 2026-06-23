@@ -98,6 +98,11 @@ def test_downloaded_files_local_qg() -> None:
         qset = ctx.questions
         questions = qset.questions if qset else []
 
+        if qset:
+            assert ctx.extraction is not None
+            assert len(ctx.extraction.questions) == len(qset.questions)
+
+
         ext = ctx.extraction
         print("clean_text_len:", len((ext.clean_text if ext else "") or ""))
         print("summary:", ext.summary if ext else None)
@@ -107,9 +112,12 @@ def test_downloaded_files_local_qg() -> None:
 
         print(f"\n=== {path.name} ===")
         for i, q in enumerate(questions, 1):
-            # q might be an object with .prompt OR a plain string depending on your pipeline
-            prompt = getattr(q, "prompt", str(q))
-            print(f"{i}. {prompt}")
+            print(f"{i}. Q: {q.question}")
+            print(f"   A: {q.answer}")
+            print(f"   confidence: {q.confidence:.2f}")
+            if q.source_sentence:
+                print(f"   source: {q.source_sentence[:120]}")
+
 
         total_questions += len(questions)
 

@@ -81,7 +81,7 @@ class Question:
 @dataclass(slots=True)
 class QuestionSet:
     document: DocumentRecord
-    questions: List[Union["Question", "QuestionItem"]] = field(default_factory=list)
+    questions: List["QuestionItem"]
     generated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     strategy: Optional[str] = None
 
