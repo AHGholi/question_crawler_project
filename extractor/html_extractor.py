@@ -1,3 +1,4 @@
+# extractor/html_extractor.py
 from __future__ import annotations
 
 import re
@@ -13,7 +14,7 @@ class HTMLExtractor:
     _WS_RE = re.compile(r"\s+")
     _SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
-    # Only truly non-content tags here
+    # Non-content / structural noise tags
     _DROP_TAGS = {
         "script",
         "style",
@@ -26,19 +27,31 @@ class HTMLExtractor:
         "input",
         "select",
         "textarea",
+        "nav",
+        "header",
+        "footer",
+        "aside",
     }
 
     # Noisy hints (class/id/role/aria-label)
     _NOISY_HINTS_RE = re.compile(
         r"(menu|sidebar|cookie|consent|breadcrumb|social|share|subscribe|newsletter|"
         r"promo|advert|ads|banner|pagination|toolbar|related|recommend|comment|"
-        r"login|signin|signup|language|locale|table-of-contents|toc|masthead)",
+        r"login|signin|signup|language|locale|table-of-contents|toc|masthead|"
+        r"header|footer)",
         flags=re.IGNORECASE,
     )
 
-    # Protected containers we should not delete even if hint matches partially
+    # Keep this tight to avoid protecting noisy containers accidentally
     _PROTECTED_HINTS_RE = re.compile(
-        r"(mw-content-text|\bcontent\b|\bmain\b|\barticle\b|post|entry|bodyContent)",
+        r"(mw-content-text|bodyContent|entry-content|article[-_ ]?content|post[-_ ]?content)",
+        flags=re.IGNORECASE,
+    )
+
+    # Site-specific noisy blocks (e.g., GeeksforGeeks)
+    _SITE_NOISE_RE = re.compile(
+        r"(gfg_header|headerMainList|containerSubheader|GFG_AD_|"
+        r"sidebar|footer|comment|related|recommend)",
         flags=re.IGNORECASE,
     )
 
@@ -104,7 +117,7 @@ class HTMLExtractor:
             if "display:none" in style or "visibility:hidden" in style:
                 node.decompose()
 
-        # 3) Drop nodes by noisy hints, with protection for core content containers
+        # 3) Drop known site-noise blocks first (high precision)
         for node in soup.find_all(True):
             if not isinstance(node, Tag):
                 continue
@@ -128,7 +141,33 @@ class HTMLExtractor:
             if not attrs_text:
                 continue
 
-            # protect important content containers
+            if self._SITE_NOISE_RE.search(attrs_text):
+                node.decompose()
+
+        # 4) Generic noisy hints with protection for real content containers
+        for node in soup.find_all(True):
+            if not isinstance(node, Tag):
+                continue
+
+            attrs = node.attrs or {}
+            raw_class = attrs.get("class")
+            if isinstance(raw_class, list):
+                class_text = " ".join(str(x) for x in raw_class if x is not None)
+            else:
+                class_text = str(raw_class or "")
+
+            attrs_text = " ".join(
+                [
+                    class_text,
+                    str(attrs.get("id") or ""),
+                    str(attrs.get("role") or ""),
+                    str(attrs.get("aria-label") or ""),
+                ]
+            ).strip()
+
+            if not attrs_text:
+                continue
+
             if self._PROTECTED_HINTS_RE.search(attrs_text):
                 continue
 
@@ -136,32 +175,50 @@ class HTMLExtractor:
                 node.decompose()
 
     def _pick_content_root(self, soup: BeautifulSoup) -> Optional[Tag]:
+        # Put site-specific and semantic selectors first
         selectors = [
+            ".MainArticleContent_articleMainContentCss__b_1_R",  # GfG
+            ".article--viewer_content",                          # GfG
             "article",
             "main",
             "[role='main']",
             "#mw-content-text",   # wikipedia
-            "#content",
             "#bodyContent",       # wikipedia
-            ".content",
+            "#content",
+            ".entry-content",
+            ".post-content",
+            ".article-content",
             ".main-content",
             "#main-content",
             ".post",
             ".article",
-            ".entry-content",
+            ".content",
         ]
 
         best: Optional[Tag] = None
         best_len = 0
+        best_score = -1.0
 
         for sel in selectors:
             for node in soup.select(sel):
                 if not isinstance(node, Tag):
                     continue
+
                 txt = self._clean_text(node.get_text(" ", strip=True))
-                if len(txt) > best_len:
+                if not txt:
+                    continue
+
+                txt_len = len(txt)
+                alpha = sum(ch.isalpha() for ch in txt)
+                alpha_ratio = alpha / max(len(txt), 1)
+
+                # Prefer long, language-rich blocks
+                score = txt_len * alpha_ratio
+
+                if score > best_score or (score == best_score and txt_len > best_len):
                     best = node
-                    best_len = len(txt)
+                    best_len = txt_len
+                    best_score = score
 
         if best is not None:
             return best

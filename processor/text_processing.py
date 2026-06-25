@@ -1,102 +1,176 @@
-"""
-processor/text_processing.py
-
-Provides text preprocessing utilities:
-- normalization (lowercasing, punctuation removal)
-- tokenization
-- stopword removal
-- lemmatization
-"""
+from __future__ import annotations
 
 import re
-import string
-import spacy
 from typing import List
-# Load small English model (do once globally)
-# This model includes tokenizer, tagger, and lemmatizer
-_nlp = spacy.load("en_core_web_sm")
 
-class TextProcessor:
+# Keep your existing spaCy wiring if you already have it in this file.
+# This module-level cache avoids reloading the model repeatedly.
+_NLP = None
+
+
+def _get_nlp():
     """
-    A class for preprocessing text for further NLP analysis.
+    Returns a spaCy pipeline with sentencizer/parser enabled.
+    Falls back gracefully if spaCy/model is unavailable.
     """
+    global _NLP
+    if _NLP is not None:
+        return _NLP
+
+    try:
+        import spacy
+
+        # Try common English model first
+        try:
+            nlp = spacy.load("en_core_web_sm")
+        except Exception:
+            # Fallback to blank English with sentencizer
+            nlp = spacy.blank("en")
+            if "sentencizer" not in nlp.pipe_names:
+                nlp.add_pipe("sentencizer")
+
+        # Ensure sentence boundaries exist
+        if "parser" not in nlp.pipe_names and "sentencizer" not in nlp.pipe_names:
+            nlp.add_pipe("sentencizer")
+
+        _NLP = nlp
+        return _NLP
+    except Exception:
+        _NLP = False
+        return _NLP
 
 
-    def __init__(self, nlp=None):
-        self.nlp = nlp or _nlp
-        
+def normalize_whitespace(text: str) -> str:
+    if not text:
+        return ""
+    text = text.replace("\u00a0", " ")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n\s*\n+", "\n\n", text)
+    return text.strip()
 
-    def preprocess_text(self, text: str) -> List[str]:
-        """
-        Tokenize, lemmatize, and remove stopwords and punctuation.
-        """
-        doc = self.nlp(text.lower())
 
-        return [
-            token.lemma_
-            for token in doc
-            if not token.is_stop
-            and not token.is_punct
-            and token.is_alpha
-        ]
-
-    def normalize_text(self, text: str) -> str:
-        """
-        Normalize text: lowercase, remove URLs, digits, and excessive spaces.
-        """
-        text = text.lower()
-        text = re.sub(r"http\S+|www\S+", "", text)    # remove URLs
-        text = re.sub(r"\d+", "", text)               # remove digits
-        text = re.sub(r'\s+', ' ', text).strip()      # collapse multiple spaces
-        return text
-
-    def clean_punctuation(self, text: str) -> str:
-        """
-        Remove punctuation safely from text.
-        """
-        return text.translate(str.maketrans('', '', string.punctuation))
-
-    def tokenize(self, text: str):
-        """
-        Tokenize text using spaCy.
-        Returns a list of token objects.
-        """
-        doc = self.nlp(text)
-        return [token for token in doc]
-
-    def lemmatize_tokens(self, tokens):
-        """
-        Lemmatize tokens and remove stopwords/non-alphabetic terms.
-        Returns a list of lemmatized words.
-        """
-        processed = [
-            token.lemma_ for token in tokens
-            if not token.is_stop and token.is_alpha
-        ]
-        return processed
-
-    def process(self, text: str):
-        """
-        Main pipeline call: full text preprocessing
-        -> normalized text -> tokens -> lemmas
-        Returns list of processed tokens.
-        """
-        normalized = self.normalize_text(text)
-        cleaned = self.clean_punctuation(normalized)
-        tokens = self.tokenize(cleaned)
-        lemmas = self.lemmatize_tokens(tokens)
-        return lemmas
-
-_default_processor = TextProcessor(_nlp)
-
-def preprocess_text(text: str) -> List[str]:
+def approx_token_count(text: str) -> int:
     """
-    Functional helper so callers/tests can preprocess without instantiating the class.
+    Lightweight token estimate (word-ish units).
+    Good enough for chunk sizing without a tokenizer dependency.
     """
-    return _default_processor.preprocess_text(text)
+    if not text:
+        return 0
+    return len(re.findall(r"\w+|[^\w\s]", text, flags=re.UNICODE))
 
-if __name__ == "__main__":
-    sample = "Neural networks are systems inspired by the human brain. They learn from data!"
-    processor = TextProcessor()
-    result = processor.process(sample)
-    print(f"Processed tokens: {result}")
+
+def split_into_sentences(text: str) -> List[str]:
+    """
+    Sentence split with spaCy when available; regex fallback otherwise.
+    """
+    text = normalize_whitespace(text)
+    if not text:
+        return []
+
+    nlp = _get_nlp()
+    if nlp:
+        try:
+            doc = nlp(text)
+            sents = [s.text.strip() for s in doc.sents if s.text and s.text.strip()]
+            if sents:
+                return sents
+        except Exception:
+            pass
+
+    # Regex fallback (not perfect, but robust)
+    parts = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9\"'(\[])|\n+", text)
+    sents = [p.strip() for p in parts if p and p.strip()]
+    return sents
+
+
+def chunk_text(
+    text: str,
+    max_tokens: int = 220,
+    overlap_sentences: int = 1,
+    min_chunk_chars: int = 180,
+) -> List[str]:
+    """
+    Build coherent overlapping chunks from sentences.
+
+    Args:
+        text: input text
+        max_tokens: approximate max tokens per chunk
+        overlap_sentences: number of trailing sentences to carry into next chunk
+        min_chunk_chars: drop chunks shorter than this unless it's the only chunk
+
+    Returns:
+        List of chunk strings.
+    """
+    text = normalize_whitespace(text)
+    if not text:
+        return []
+
+    sentences = split_into_sentences(text)
+    if not sentences:
+        return [text] if len(text) >= min_chunk_chars else ([text] if text else [])
+
+    chunks: List[str] = []
+    i = 0
+    n = len(sentences)
+
+    while i < n:
+        current: List[str] = []
+        cur_tokens = 0
+        j = i
+
+        while j < n:
+            s = sentences[j].strip()
+            if not s:
+                j += 1
+                continue
+
+            s_tokens = approx_token_count(s)
+
+            # If first sentence itself is too big, force-include it
+            if not current and s_tokens >= max_tokens:
+                current.append(s)
+                j += 1
+                break
+
+            # If adding sentence exceeds cap, stop chunk growth
+            if current and (cur_tokens + s_tokens > max_tokens):
+                break
+
+            current.append(s)
+            cur_tokens += s_tokens
+            j += 1
+
+        if not current:
+            # safety
+            i += 1
+            continue
+
+        chunk = " ".join(current).strip()
+        if chunk:
+            chunks.append(chunk)
+
+        # Advance with overlap
+        if j >= n:
+            break
+
+        # Rewind start by overlap_sentences from j
+        if overlap_sentences > 0:
+            i = max(i + 1, j - overlap_sentences)
+        else:
+            i = j
+
+    # Remove tiny chunks (except if it's the only one)
+    if len(chunks) > 1:
+        chunks = [c for c in chunks if len(c) >= min_chunk_chars] or chunks
+
+    # De-duplicate exact repeats while preserving order
+    deduped: List[str] = []
+    seen = set()
+    for c in chunks:
+        key = c.strip()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(key)
+
+    return deduped

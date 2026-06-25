@@ -1,5 +1,3 @@
-# question_generator/base.py
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -13,6 +11,7 @@ class QGInput:
     summary: str | None = None
     keywords: List[str] = field(default_factory=list)
     sentences: List[str] = field(default_factory=list)
+    chunks: List[str] = field(default_factory=list)  # NEW
     num_questions: int = 10
 
 

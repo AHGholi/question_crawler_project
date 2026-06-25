@@ -30,13 +30,20 @@ pip install -r requirements.txt
 ## Run the pipeline
 
 ```powershell
-python main.py "machine learning"
+python main.py --query "machine learning"
+```
+
+## Process local files
+
+```powershell
+python main.py --input-files sample.txt
+python ui/cli.py --input-files sample.txt
 ```
 
 ## Run the CLI wrapper
 
 ```powershell
-python ui/cli.py "machine learning"
+python ui/cli.py --query "machine learning"
 ```
 
 ## Run the Streamlit UI

@@ -1,4 +1,4 @@
-# question_generator/utils/common.py
+# utils/common.py
 from __future__ import annotations
 
 import re

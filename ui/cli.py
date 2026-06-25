@@ -1,3 +1,5 @@
+# ui\cli.py
+
 from __future__ import annotations
 
 import argparse
@@ -9,7 +11,8 @@ from main import run_main_pipeline
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the exam crawler question generation pipeline")
-    parser.add_argument("query", help="Search query")
+    parser.add_argument("--query", help="Search query", default=None)
+    parser.add_argument("--input-files", nargs="+", help="Local text or HTML files to process")
     parser.add_argument("--max-results", type=int, default=5, help="Maximum search results to crawl")
     parser.add_argument("--limit", type=int, default=0, help="Document processing limit (0 = no limit)")
     parser.add_argument("--show-qa", action="store_true", help="Print generated question/answer pairs")
@@ -42,8 +45,19 @@ def _safe_title(ctx: Any) -> str:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = parse_args()
+
+    if not args.query and not args.input_files:
+        raise SystemExit("Either --query or --input-files must be provided.")
+    if args.query and args.input_files:
+        raise SystemExit("Provide only one of --query or --input-files.")
+
     limit = None if args.limit == 0 else args.limit
-    result = run_main_pipeline(query=args.query, max_results=args.max_results, limit=limit)
+    result = run_main_pipeline(
+        query=args.query,
+        max_results=args.max_results,
+        limit=limit,
+        input_files=args.input_files,
+    )
 
     print("Processed documents:", result.stats.processed_documents)
     print("Failed documents:", result.stats.failed_documents)

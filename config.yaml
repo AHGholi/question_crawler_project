@@ -16,11 +16,12 @@ google:
 
 question_generator:
   enabled: true
-  provider: local_hf            # important: not "huggingface" API
-  model: google/flan-t5-large   # current env-safe model
+  provider: local_hf
+  model: google/flan-t5-large
   num_questions: 10
-  device: -1  
-  max_new_tokens: 160           # lower for cleaner output
-  temperature: 0.2              # deterministic with do_sample false
-  do_sample: false
+  device: -1
+  max_new_tokens: 320
+  temperature: 0.7
+  do_sample: true
+  top_p: 0.9
   hf_token_env: HF_TOKEN        # optional for download speed/rate
