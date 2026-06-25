@@ -51,9 +51,3 @@ python ui/cli.py --query "machine learning"
 ```powershell
 streamlit run ui/app.py
 ```
-
-## Notes
-
-- `config.yaml` contains crawler settings and Google API credentials.
-- The current runtime is designed to keep `question_generator_old/` out of the execution path.
-- Future work should replace `question_generator/` with an external question generation library that emits `QuestionItem` objects.
