@@ -1,4 +1,4 @@
-# Exam Crawler Project
+# Question Crawler Project
 
 This repository is a document crawl → extract → process → question generation pipeline.
 
