@@ -1,4 +1,5 @@
-# utils/retry.py
+"""Small retry helper for transient operations."""
+
 from __future__ import annotations
 import time
 from typing import Callable, Tuple, Type, TypeVar
@@ -14,6 +15,7 @@ def call_with_retry(
     backoff: float = 2.0,
     exceptions: ExceptionTypes = (Exception,)
 ) -> T:
+    """Retry an operation a few times with exponential backoff on failure."""
     attempt = 0
     wait = delay
     while True:

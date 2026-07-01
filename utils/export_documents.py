@@ -1,4 +1,8 @@
-# utils/export_documents.py
+"""Helpers for exporting crawler document records to JSON fixtures.
+
+This script is mainly used for integration and test data generation.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -40,10 +44,7 @@ from utils.models import DocumentRecord
 
 
 def document_to_dict(document: DocumentRecord) -> Dict[str, Any]:
-    """
-    Convert a DocumentRecord instance into a JSON-serializable dict.
-    Supports pydantic, dataclasses, __slots__, and plain objects.
-    """
+    """Convert a DocumentRecord instance into a JSON-serializable dictionary."""
     # Pydantic v2
     if hasattr(document, "model_dump"):
         data = document.model_dump()  # type: ignore[attr-defined]
@@ -90,6 +91,7 @@ def document_to_dict(document: DocumentRecord) -> Dict[str, Any]:
 
 
 def main() -> None:
+    """Run the export CLI and write DocumentRecord data to a JSON file."""
     parser = argparse.ArgumentParser(
         description="Export DocumentRecord payloads from the crawler for integration tests."
     )

@@ -1,4 +1,10 @@
 #extractor/base.py
+"""Base abstractions for the document extraction subsystem.
+
+Concrete extractors implement the protocol and can be registered so the
+processing pipeline can select an appropriate extractor for each document.
+"""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

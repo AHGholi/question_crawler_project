@@ -1,4 +1,10 @@
 # processor/pipeline.py
+"""Processing pipeline abstractions for extraction, ranking, and question generation.
+
+This module defines the step protocols and the executor that runs them in a
+predictable order for each document.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -36,6 +42,7 @@ class PipelineContext:
     errors: List[str] = field(default_factory=list)
 
     def add_error(self, message: str) -> None:
+        """Record a processing failure for later inspection by the caller."""
         self.errors.append(message)
 
 
@@ -56,6 +63,7 @@ class ProcessorPipeline:
         self.question_generator = question_generator
 
     def run(self, document: DocumentRecord) -> PipelineContext:
+        """Execute the configured processing steps for one document."""
         ctx = PipelineContext(document=document)
 
         try:

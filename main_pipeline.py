@@ -1,5 +1,11 @@
 # main_pipeline.py
 
+"""Orchestrates the high-level crawl → process → report workflow.
+
+The main pipeline coordinates document discovery with the processor pipeline and
+collects basic statistics about successfully processed documents and failures.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -13,7 +19,7 @@ load_dotenv()
 
 
 class CrawlStep(Protocol):
-    """Fetches or yields DocumentRecord instances ready for processing."""
+    """Callable that yields document records ready for processing."""
 
     def __call__(self) -> Iterable[DocumentRecord]: ...
 
@@ -26,6 +32,8 @@ class ProcessingStats:
     total_questions: int = 0
 
     def observe_context(self, context: PipelineContext) -> None:
+        """Update counters based on the outcome of one processed document."""
+        # Count every attempted document, then classify it as processed or failed.
         self.total_documents += 1
         if context.errors:
             self.failed_documents += 1
@@ -42,6 +50,7 @@ class MainPipelineResult:
 
     @property
     def has_failures(self) -> bool:
+        """Return whether any processed context recorded an error."""
         return any(ctx.errors for ctx in self.contexts)
 
 
@@ -57,13 +66,16 @@ class MainPipeline:
         processor: ProcessorPipeline,
         post_process_hook: Callable[[PipelineContext], None] | None = None,
     ) -> None:
+        # Store the two core collaborators that drive the pipeline execution.
         self.crawler = crawler
         self.processor = processor
         self.post_process_hook = post_process_hook
 
     def run(self, *, limit: Optional[int] = None) -> MainPipelineResult:
+        """Execute the pipeline for each discovered document until the limit is reached."""
         result = MainPipelineResult()
         for idx, document in enumerate(self.crawler()):
+            # Stop once the caller-defined processing cap has been reached.
             if limit is not None and idx >= limit:
                 break
 

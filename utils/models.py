@@ -1,4 +1,9 @@
-# utils/models.py
+"""Core data models used throughout the pipeline.
+
+These dataclasses describe documents, extraction results, questions, and the
+question-set objects passed between stages.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -9,6 +14,8 @@ from typing import Dict, List, Optional, Union
 
 @dataclass(slots=True)
 class DocumentRecord:
+    """Metadata and file information for a crawled or ingested document."""
+
     id: str
     title: str | None = None
     metadata: dict[str, str] = field(default_factory=dict)
@@ -19,7 +26,7 @@ class DocumentRecord:
     encoding: str | None = None
 
     def __post_init__(self) -> None:
-        # Normalize path types
+        """Normalize path-like values and keep source and target paths consistent."""
         if self.path is not None and not isinstance(self.path, Path):
             self.path = Path(self.path)
 
@@ -34,6 +41,7 @@ class DocumentRecord:
             
     @property
     def url(self) -> str | None:
+        """Return the document path as a URL-like string when available."""
         if self.source_path:
             return str(self.source_path)
         if self.path:
@@ -42,12 +50,15 @@ class DocumentRecord:
 
     @property
     def timestamp(self) -> Optional[str]:
-         return self.metadata.get("timestamp")
+        """Return the document timestamp stored in metadata, if present."""
+        return self.metadata.get("timestamp")
     
 
 
 @dataclass(slots=True)
 class ExtractionResult:
+    """Container for the text and metadata produced by an extractor stage."""
+
     document: DocumentRecord
     raw_text: str
     clean_text: str
@@ -67,11 +78,14 @@ class ExtractionResult:
 
     @property
     def document_id(self) -> str:
+        """Return the owning document identifier."""
         return self.document.id
 
 
 @dataclass(slots=True)
 class Question:
+    """Simple question representation with optional answer and metadata."""
+
     prompt: str
     answer: Optional[str] = None
     difficulty: Optional[str] = None
@@ -80,6 +94,8 @@ class Question:
 
 @dataclass(slots=True)
 class QuestionSet:
+    """A collection of generated questions for a single document."""
+
     document: DocumentRecord
     questions: List["QuestionItem"]
     generated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -87,9 +103,7 @@ class QuestionSet:
 
 @dataclass
 class QuestionItem:
-    """
-    Canonical shape for pipeline-generated question/answer pairs.
-    """
+    """Canonical shape for pipeline-generated question and answer pairs."""
     question: str
     answer: str
     source_document_id: str

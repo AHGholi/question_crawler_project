@@ -1,4 +1,9 @@
-# extractor/docx_extractor.py
+"""Word document extraction support for .doc and .docx files.
+
+The extractor reads paragraphs and tables from Microsoft Word documents and
+returns the text in the same unified structure used by the other extractors.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -38,6 +43,7 @@ class DOCDocxExtractor(BaseExtractor):
     SUPPORTED_EXTENSIONS = {".docx", ".doc"}
 
     def supports(self, document: DocumentRecord) -> bool:
+        """Return True when the document is a Word file that can be handled."""
         path = document.path
         media_type = (document.media_type or "").lower()
 
@@ -48,6 +54,7 @@ class DOCDocxExtractor(BaseExtractor):
         return False
 
     def extract(self, document: DocumentRecord) -> ExtractionResult:
+        """Extract text from a DOC or DOCX file and normalize the result."""
         path = self._ensure_path(document)
 
         if not path.exists():
@@ -86,11 +93,13 @@ class DOCDocxExtractor(BaseExtractor):
 
     @staticmethod
     def _ensure_path(document: DocumentRecord) -> Path:
+        """Resolve the file path required for extraction."""
         if document.path is None:
             raise ValueError("DocumentRecord.path must be set for extraction.")
         return document.path
 
     def _extract_docx_text(self, path: Path) -> List[str]:
+        """Extract paragraphs and table cell content from a DOCX file."""
         if DocxDocument is None:
             raise RuntimeError(
                 "Extracting DOCX files requires the optional 'python-docx' dependency."
@@ -118,6 +127,7 @@ class DOCDocxExtractor(BaseExtractor):
         return chunks
 
     def _extract_doc_text(self, path: Path) -> List[str]:
+        """Extract text from legacy DOC files via the optional textract dependency."""
         if textract is None:
             raise RuntimeError(
                 "Extracting legacy '.doc' files requires the optional 'textract' dependency."

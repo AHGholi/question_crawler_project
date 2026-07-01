@@ -1,4 +1,9 @@
-# extractor/text_extractor.py
+"""Text-file extraction for plain text documents.
+
+This module reads .txt files and produces the same extraction structure used
+for HTML and PDF documents.
+"""
+
 from __future__ import annotations
 
 import re
@@ -16,11 +21,13 @@ class TextExtractor(BaseExtractor):
     _SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
     def supports(self, document: DocumentRecord) -> bool:
+        """Return True for plain text documents and .txt files."""
         media_type = (document.media_type or "").lower()
         path = str(document.path or document.source_path or "").lower()
         return media_type == "text/plain" or path.endswith(".txt")
 
     def extract(self, document: DocumentRecord) -> ExtractionResult:
+        """Read the text file and return a normalized extraction result."""
         text = document.content or ""
         if not text:
             path = document.path or document.source_path
@@ -49,6 +56,7 @@ class TextExtractor(BaseExtractor):
         )
 
     def _split_sentences(self, text: str) -> List[str]:
+        """Split the cleaned text into sentence-like chunks."""
         if not text:
             return []
 

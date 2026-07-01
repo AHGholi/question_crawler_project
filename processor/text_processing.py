@@ -1,7 +1,85 @@
+"""Lightweight text normalization and tokenization utilities for the processor pipeline.
+
+The helpers in this module transform raw text into a simple token representation
+that can be used by ranking and similarity components.
+"""
+
 from __future__ import annotations
 
 import re
 from typing import List
+
+
+class TextProcessor:
+    """Simple text-processing helper used by the processor and ranking modules."""
+
+    def normalize_text(self, text: str) -> str:
+        """Normalize text by lowercasing, removing URLs, and stripping punctuation-like noise."""
+        if not text:
+            return ""
+        text = text.lower()
+        text = re.sub(r"https?://\S+|www\.\S+", " ", text)
+        text = re.sub(r"[^a-z0-9\s.!?]", " ", text)
+        text = re.sub(r"\b\d+\b", " ", text)
+        text = re.sub(r"\s+", " ", text)
+        return text.strip()
+
+    def clean_punctuation(self, text: str) -> str:
+        """Remove punctuation while preserving word boundaries."""
+        if not text:
+            return ""
+        text = re.sub(r"[^\w\s]", " ", text)
+        text = re.sub(r"\s+", " ", text)
+        return text.strip()
+
+    def tokenize(self, text: str) -> List[str]:
+        """Split text into lowercase tokens."""
+        cleaned = self.normalize_text(text)
+        tokens = []
+        for token in cleaned.split():
+            token = token.strip().strip("!?.")
+            if token:
+                tokens.append(token)
+        return tokens
+
+    def lemmatize_tokens(self, tokens: List[str]) -> List[str]:
+        """Return a basic lemma-like form by stripping common inflections."""
+        lemmas: List[str] = []
+        for token in tokens:
+            token = token.strip()
+            if not token:
+                continue
+            if token in {"are", "is", "was", "were", "be", "been", "being"}:
+                continue
+            if token.endswith("ies") and len(token) > 4:
+                token = token[:-3] + "y"
+            elif token.endswith("ing") and len(token) > 5:
+                token = token[:-3]
+            elif token.endswith("es") and len(token) > 4:
+                token = token[:-2]
+            elif token.endswith("s") and len(token) > 3:
+                token = token[:-1]
+            if token in {"systems", "system"}:
+                token = "system"
+            if token in {"data", "datum"}:
+                token = "datum"
+            lemmas.append(token)
+        return lemmas
+
+    def process(self, text: str) -> List[str]:
+        """Return a cleaned token list for downstream ranking steps."""
+        tokens = self.tokenize(text)
+        lemmas = self.lemmatize_tokens(tokens)
+        return [lemma for lemma in lemmas if lemma not in {"the", "and", "from", "to", "of"}]
+
+    def preprocess_text(self, text: str) -> List[str]:
+        """Alias for process() to match the relevance ranker interface."""
+        return self.process(text)
+
+
+def preprocess_text(text: str) -> List[str]:
+    """Convenience function that uses the default TextProcessor."""
+    return TextProcessor().process(text)
 
 # Keep your existing spaCy wiring if you already have it in this file.
 # This module-level cache avoids reloading the model repeatedly.

@@ -1,3 +1,9 @@
+"""Factory helpers for constructing local Hugging Face text-to-text pipelines.
+
+The module wraps model loading so the question generator can use a simple
+callable interface regardless of the underlying transformers implementation.
+"""
+
 from __future__ import annotations
 
 from typing import Protocol
@@ -7,6 +13,8 @@ from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
 
 class Text2TextPipe(Protocol):
+    """Callable protocol for text-to-text generation pipelines."""
+
     def __call__(
         self,
         prompt: str,
@@ -23,7 +31,10 @@ class Text2TextPipe(Protocol):
 
 
 class _Seq2SeqRunner:
+    """Small wrapper around a Hugging Face seq2seq model for question generation."""
+
     def __init__(self, model_name: str, device: int) -> None:
+        """Load the tokenizer and model and move them to the requested device."""
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
 
@@ -72,4 +83,5 @@ class _Seq2SeqRunner:
 
 
 def make_text2text_pipeline(model_name: str, device: int) -> Text2TextPipe:
+    """Create a callable text-to-text pipeline for the requested model."""
     return _Seq2SeqRunner(model_name=model_name, device=device)

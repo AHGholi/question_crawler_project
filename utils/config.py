@@ -1,4 +1,9 @@
-# utils/config.py
+"""Configuration loading helpers for the crawler pipeline.
+
+This module reads YAML settings from disk or environment variables and exposes a
+small helper for retrieving nested values safely.
+"""
+
 from __future__ import annotations
 import os
 from functools import lru_cache
@@ -11,11 +16,14 @@ DEFAULT_CONFIG_PATH = "config.yaml"
 
 
 class ConfigError(RuntimeError):
+    """Raised when configuration cannot be loaded or resolved."""
+
     pass
 
 
 @lru_cache(maxsize=1)
 def load_config(path: Optional[str] = None) -> Dict[str, Any]:
+    """Load and cache the YAML configuration for the project."""
     load_dotenv()  # ensures .env is read once
     cfg_path = path or os.getenv("CONFIG_FILE", DEFAULT_CONFIG_PATH)
 
@@ -32,9 +40,7 @@ def load_config(path: Optional[str] = None) -> Dict[str, Any]:
 
 
 def get_setting(*keys: str, default: Any = None) -> Any:
-    """
-    Access nested config keys: get_setting("crawler", "crawl_delay_seconds").
-    """
+    """Access nested config keys such as get_setting("crawler", "crawl_delay_seconds")."""
     data = load_config()
     cursor: Any = data
     for key in keys:

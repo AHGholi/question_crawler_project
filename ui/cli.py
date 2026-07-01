@@ -1,5 +1,11 @@
 # ui\cli.py
 
+"""Command-line interface for running the exam-crawler workflow.
+
+This module exposes a small terminal-based entry point for invoking the same
+pipeline that the Streamlit UI uses.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -10,6 +16,7 @@ from main import run_main_pipeline
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments for the pipeline runner."""
     parser = argparse.ArgumentParser(description="Run the exam crawler question generation pipeline")
     parser.add_argument("--query", help="Search query", default=None)
     parser.add_argument("--input-files", nargs="+", help="Local text or HTML files to process")
@@ -20,14 +27,17 @@ def parse_args() -> argparse.Namespace:
 
 
 def _question_text(q: Any) -> str:
+    """Return a question string from a question-like object."""
     return (getattr(q, "question", None) or getattr(q, "prompt", None) or "").strip()
 
 
 def _question_answer(q: Any) -> str:
+    """Return an answer string from a question-like object."""
     return (getattr(q, "answer", None) or "").strip()
 
 
 def _iter_questions(ctx: Any) -> Iterable[Any]:
+    """Yield the question objects stored in a pipeline context."""
     if not ctx or not getattr(ctx, "questions", None):
         return []
     items = getattr(ctx.questions, "questions", None)
@@ -35,6 +45,7 @@ def _iter_questions(ctx: Any) -> Iterable[Any]:
 
 
 def _safe_title(ctx: Any) -> str:
+    """Return a readable title for a document context in the terminal output."""
     doc = getattr(ctx, "document", None)
     title = getattr(doc, "title", None) if doc else None
     if title and str(title).strip():
@@ -43,6 +54,7 @@ def _safe_title(ctx: Any) -> str:
 
 
 def main() -> None:
+    """Execute the CLI workflow and print the generated question summary."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = parse_args()
 

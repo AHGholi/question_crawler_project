@@ -1,5 +1,7 @@
 # crawler/downloader.py
 
+"""Simple HTTP downloader used by the crawler subsystem."""
+
 from __future__ import annotations
 import os
 import logging
@@ -11,9 +13,10 @@ DEFAULT_TIMEOUT = 15
 
 
 def download_file(url: str, output_path: str) -> str:
-    """
-    Download URL to output_path and return the output_path.
-    Raises exceptions on HTTP errors.
+    """Download a URL to a local file and return the saved path.
+
+    The function validates the response type before writing the body, so only
+    acceptable document formats are stored locally.
     """
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 

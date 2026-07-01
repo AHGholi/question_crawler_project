@@ -1,4 +1,8 @@
-# processor/similarity.py
+"""Similarity helpers for comparing document vectors.
+
+This module provides basic cosine-similarity operations that the ranking and
+relevance-scoring components rely on.
+"""
 
 from typing import List, Tuple
 import numpy as np
@@ -6,13 +10,10 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 
 class SimilarityEngine:
-    """
-    Computes cosine similarity between TF-IDF vectors.
-    """
+    """Compute cosine similarity between TF-IDF vectors."""
 
     def compute_similarity_matrix(self, tfidf_matrix) -> np.ndarray:
-        """
-        Compute cosine similarity between all documents.
+        """Compute cosine similarity between all documents in a matrix.
 
         Args:
             tfidf_matrix: Sparse TF-IDF matrix (n_docs x n_features)
@@ -28,8 +29,7 @@ class SimilarityEngine:
         doc_index: int,
         top_k: int = 5
     ) -> List[Tuple[int, float]]:
-        """
-        Get the top-k most similar documents to a given document.
+        """Return the top-k most similar documents for a given document index.
 
         Args:
             similarity_matrix: Cosine similarity matrix
@@ -55,8 +55,7 @@ class SimilarityEngine:
         query_vector,
         document_matrix
     ) -> List[float]:
-        """
-        Compute similarity between a query and all documents.
+        """Compute similarity between a query vector and a matrix of document vectors.
 
         Args:
             query_vector: TF-IDF vector for the query (1 x n_features)

@@ -1,4 +1,9 @@
-# crawler/robots.py
+"""Support for consulting robots.txt rules before crawling a site.
+
+The crawler uses this module to respect site policies and avoid excessive
+requests to hosts that define crawl restrictions.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -17,6 +22,8 @@ DEFAULT_TIMEOUT = 10
 
 @dataclass
 class RobotsEntry:
+    """Cached robots.txt state for one host."""
+
     parser: Optional[RobotFileParser]
     fetched_at: float
     allow_all: bool
@@ -24,6 +31,7 @@ class RobotsEntry:
 _CACHE: Dict[str, RobotsEntry] = {}
 
 def _robots_url_for(url: str) -> str:
+    """Build the robots.txt URL that matches the supplied page URL."""
     parsed = urlparse(url)
     scheme = parsed.scheme or "http"
     if not parsed.netloc:
@@ -31,6 +39,7 @@ def _robots_url_for(url: str) -> str:
     return urlunparse((scheme, parsed.netloc, "/robots.txt", "", "", ""))
 
 def _load_entry(url: str, user_agent: str) -> RobotsEntry:
+    """Load and cache robots.txt rules for a host, using a short-lived cache."""
     robots_url = _robots_url_for(url)
     cached = _CACHE.get(robots_url)
     now = time.time()
@@ -57,6 +66,7 @@ def _load_entry(url: str, user_agent: str) -> RobotsEntry:
     return entry
 
 def is_allowed(url: str, user_agent: str) -> bool:
+    """Return True when the URL is permitted by the site's robots.txt rules."""
     try:
         entry = _load_entry(url, user_agent)
     except ValueError:
@@ -69,6 +79,7 @@ def is_allowed(url: str, user_agent: str) -> bool:
     return allowed
 
 def _to_optional_float(value: object) -> Optional[float]:
+    """Convert a crawl-delay value into an optional float when possible."""
     if value is None:
         return None
     if isinstance(value, (int, float)):
@@ -82,6 +93,7 @@ def _to_optional_float(value: object) -> Optional[float]:
     return None
 
 def get_crawl_delay(url: str, user_agent: str) -> Optional[float]:
+    """Return the crawl delay requested by a site, if one is defined."""
     try:
         entry = _load_entry(url, user_agent)
     except ValueError:

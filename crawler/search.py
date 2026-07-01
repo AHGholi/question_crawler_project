@@ -1,4 +1,10 @@
-# crawler/search.py
+"""Search and download orchestration for the crawler subsystem.
+
+This module collects results from the configured search backend, filters them
+according to domain and file-type rules, and downloads accepted pages into the
+project's download directory.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -42,6 +48,7 @@ DEFAULT_DENY_EXTENSIONS = [
 
 
 def _normalize_extensions(configured: Optional[List[str]]) -> List[str]:
+    """Normalize configured file extensions to a consistent lowercase form."""
     source = configured or DEFAULT_DENY_EXTENSIONS
     normalized: List[str] = []
     for ext in source:
@@ -78,6 +85,7 @@ _domain_next_allowed: Dict[str, float] = {}
 
 
 def _has_denied_extension(url: str) -> bool:
+    """Return True when the URL points to a file type that should be skipped."""
     if not DENY_EXTENSIONS:
         return False
     lowered = url.lower()
@@ -85,6 +93,7 @@ def _has_denied_extension(url: str) -> bool:
 
 
 def _effective_delay(url: str) -> float:
+    """Resolve the crawl delay for a URL, preferring robots rules when available."""
     delay = None
     if robots and hasattr(robots, "get_crawl_delay"):
         try:
@@ -96,6 +105,7 @@ def _effective_delay(url: str) -> float:
 
 
 def _reserve_slot(url: str) -> None:
+    """Ensure a domain is not crawled too aggressively by enforcing a delay."""
     netloc = urlparse(url).netloc.lower() or "default"
     delay = _effective_delay(url)
     while True:
@@ -110,6 +120,7 @@ def _reserve_slot(url: str) -> None:
 
 
 def _download_candidate(task: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+    """Download one candidate URL and package the result into a search payload."""
     url = task["url"]
     _reserve_slot(url)
     try:
@@ -130,9 +141,10 @@ def _download_candidate(task: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
 
 
 def run_search(query: str, max_results: int = 10) -> List[Dict[str, Any]]:
-    """
-    Collect search results and download allowed pages.
-    Returns list of metadata dicts.
+    """Collect search results, filter them, and download the accepted pages.
+
+    The function coordinates the search backend, domain filtering, and threaded
+    downloads so the pipeline receives a consistent list of metadata records.
     """
     logger.info("Searching Google for: %s", query)
     try:

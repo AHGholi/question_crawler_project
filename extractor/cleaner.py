@@ -1,4 +1,9 @@
-#extractor/cleaner.py
+"""Text-cleaning helpers used by the extractor modules.
+
+These utilities normalize and strip irrelevant markup so the downstream
+processing stages work with cleaner, more consistent text.
+"""
+
 from __future__ import annotations
 
 import html
@@ -23,10 +28,12 @@ WHITESPACE_RE = re.compile(r"\s+")
 
 
 def remove_control_characters(text: str) -> str:
+    """Replace control characters with spaces to keep the text readable."""
     return CONTROL_CHAR_RE.sub(" ", text)
 
 
 def collapse_whitespace(text: str, collapse_to: str = " ") -> str:
+    """Normalize repeated whitespace into a single separator."""
     if not text:
         return ""
     return WHITESPACE_RE.sub(collapse_to, text).strip()
@@ -39,6 +46,7 @@ def _render_contents(soup: BeautifulSoupType) -> str:
 
 
 def strip_html_tags(text: str, keep_tags: Optional[Sequence[str]] = None) -> str:
+    """Remove HTML markup while optionally preserving selected tags."""
     if not text:
         return ""
 

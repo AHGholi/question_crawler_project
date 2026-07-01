@@ -1,4 +1,9 @@
-# extractor/pdf_extractor.py
+"""PDF extraction support for the document pipeline.
+
+The extractor attempts to read text from PDFs using the available PDF library
+and falls back to a simple heuristic parser when necessary.
+"""
+
 from __future__ import annotations
 
 import io
@@ -27,6 +32,7 @@ class PDFExtractor(BaseExtractor):
     SUPPORTED_EXTENSIONS = {".pdf"}
 
     def supports(self, document: DocumentRecord) -> bool:
+        """Return True when the input document looks like a PDF file."""
         media_type = (document.media_type or "").lower()
         if media_type in self.SUPPORTED_MEDIA_TYPES:
             return True
@@ -35,6 +41,7 @@ class PDFExtractor(BaseExtractor):
         return path is not None and path.suffix.lower() in self.SUPPORTED_EXTENSIONS
 
     def extract(self, document: DocumentRecord) -> ExtractionResult:
+        """Extract text from a PDF and return a standardized extraction result."""
         path = self._ensure_path(document)
         if not path.exists():
             raise FileNotFoundError(f"PDF file not found: {path}")
@@ -59,6 +66,7 @@ class PDFExtractor(BaseExtractor):
     
     @staticmethod
     def _ensure_path(document: DocumentRecord) -> Path:
+        """Resolve the file path required for PDF reading."""
         path = document.path or document.source_path
         if path is None:
             raise ValueError("DocumentRecord.path must be set for PDF extraction.")
@@ -66,6 +74,7 @@ class PDFExtractor(BaseExtractor):
 
 
     def _extract_with_reader(self, data: bytes) -> str:
+        """Extract text from the PDF using the optional pypdf library."""
         if PdfReader is None:  # pragma: no cover
             return ""
 
@@ -79,6 +88,7 @@ class PDFExtractor(BaseExtractor):
         return "\n".join(texts).strip()
 
     def _extract_with_fallback(self, data: bytes) -> str:
+        """Fallback parser that scans PDF content for text-like object data."""
         decoded = data.decode("latin-1", errors="ignore")
         matches = _TEXT_OBJECT_RE.findall(decoded)
         if not matches:

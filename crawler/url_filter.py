@@ -1,4 +1,9 @@
-# crawler/url_filter.py
+"""Helpers for validating and filtering URLs before they are downloaded.
+
+This module keeps the crawler from following unsupported schemes, unwanted file
+formats, or domains that should not be processed.
+"""
+
 from __future__ import annotations
 from typing import Optional, List
 from urllib.parse import urlparse, urlunparse
@@ -11,7 +16,13 @@ BLACKLISTED_EXTENSIONS = (
 
 ALLOWED_SCHEMES = ("http", "https")
 
+
 def normalize_url(url: str) -> str:
+    """Normalize a URL by standardizing its scheme, host, and path.
+
+    The function removes default ports and fragments so similar URLs are treated
+    consistently during filtering and storage.
+    """
     parsed = urlparse(url)
     scheme = (parsed.scheme or "http").lower()
     netloc = parsed.netloc.lower()
@@ -26,23 +37,28 @@ def normalize_url(url: str) -> str:
 
     return urlunparse((scheme, netloc, path, "", query, ""))  # drop fragment
 
+
 def is_valid_scheme(url: str) -> bool:
+    """Return True when the URL uses an allowed network scheme."""
     p = urlparse(url)
     return p.scheme in ALLOWED_SCHEMES
 
+
 def has_disallowed_extension(url: str) -> bool:
+    """Return True if the URL points to a file type that should be skipped."""
     u = url.lower()
     return any(u.endswith(ext) for ext in BLACKLISTED_EXTENSIONS)
+
 
 def candidate_allowed(
     url: str,
     allow_domains: Optional[List[str]] = None,
     deny_domains: Optional[List[str]] = None
 ) -> bool:
-    """
-    True if URL passes basic checks.
-    - allow_domains: if provided, only netlocs that endwith one entry are allowed.
-    - deny_domains: if provided, any netloc containing an entry is rejected.
+    """Return True when a URL passes the crawler's basic inclusion rules.
+
+    The function blocks unsupported schemes, blocked file extensions, and any
+    domains explicitly denied by the configuration.
     """
     if not url:
         return False

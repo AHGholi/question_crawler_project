@@ -1,3 +1,9 @@
+"""Local Hugging Face-backed question generation implementation.
+
+This module runs a seq2seq model locally and turns its output into a clean list
+of study questions.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -13,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class LocalHFQGConfig:
+    """Configuration for the local Hugging Face question generator."""
     model_name: str = "google/flan-t5-large"
     device: int = -1
 
@@ -39,15 +46,18 @@ class LocalHFQGConfig:
 
 
 class LocalHFQuestionGenerator(QGBackend):
+    """Generate questions using a locally loaded Hugging Face text-to-text model."""
+
     def __init__(self, config: LocalHFQGConfig | None = None):
+        """Initialize the model wrapper and its generation settings."""
         self.config = config or LocalHFQGConfig()
         self.pipe: Text2TextPipe = make_text2text_pipeline(
             model_name=self.config.model_name,
             device=self.config.device,
         )
 
-    # ✅ Protocol-compatible signature
     def generate(self, data: QGInput) -> List[str]:
+        """Generate a batch of study questions from the supplied passage chunks."""
         target = max(int(data.num_questions or 10), 1)
 
         chunks = self._prepare_chunks(data)
@@ -125,7 +135,7 @@ class LocalHFQuestionGenerator(QGBackend):
         return final
 
     def _prepare_chunks(self, data: QGInput) -> List[str]:
-        # Primary source: upstream chunks
+        """Prepare the best available text chunks for prompting the model."""
         raw_chunks = list(data.chunks or [])
         chunks = [self._clean_chunk(c) for c in raw_chunks if c and c.strip()]
         chunks = [c for c in chunks if self._is_usable_chunk(c)]
@@ -156,13 +166,15 @@ class LocalHFQuestionGenerator(QGBackend):
         return []
 
     def _clean_chunk(self, text: str) -> str:
+        """Normalize whitespace inside a text chunk."""
         return re.sub(r"\s+", " ", text).strip()
 
     def _is_usable_chunk(self, text: str) -> bool:
+        """Decide whether a chunk is long and detailed enough for prompting."""
         return len(text) >= 180 and text.count(" ") >= 25
 
     def _chunk_context(self, context: str) -> List[str]:
-        # Split by paragraph-like breaks first
+        """Split fallback context into smaller, usable passages for generation."""
         parts = re.split(r"\n\s*\n+", context)
         out: List[str] = []
 
@@ -199,6 +211,7 @@ class LocalHFQuestionGenerator(QGBackend):
         return out
 
     def _build_prompt(self, chunk: str, n: int) -> str:
+        """Create a concise prompt for the model from a single text chunk."""
         return (
             f"Generate up to {n} high-quality study question"
             f"{'' if n == 1 else 's'} from the passage.\n"
@@ -212,6 +225,7 @@ class LocalHFQuestionGenerator(QGBackend):
         )
 
     def _run_model(self, prompt: str) -> str:
+        """Send a prompt to the local pipeline and normalize the returned text."""
         out = self.pipe(
             prompt,
             max_new_tokens=self.config.max_new_tokens,
@@ -229,6 +243,7 @@ class LocalHFQuestionGenerator(QGBackend):
         return str(out).strip()
 
     def _parse_output(self, text: str) -> List[str]:
+        """Turn raw model output into a list of candidate questions."""
         if not text:
             return []
 
@@ -254,6 +269,7 @@ class LocalHFQuestionGenerator(QGBackend):
         return [x for x in out if x]
 
     def _postprocess(self, items: Sequence[str]) -> List[str]:
+        """Filter and normalize generated questions before returning them."""
         out: List[str] = []
         for q in items:
             n = self._normalize_question(q)
@@ -263,6 +279,7 @@ class LocalHFQuestionGenerator(QGBackend):
         return out
 
     def _normalize_question(self, q: str) -> str:
+        """Normalize a single candidate question into a clean sentence form."""
         q = re.sub(r"\s+", " ", q).strip()
         q = q.strip(" -•\t")
         q = re.sub(r"[.!]+$", "", q).strip()
@@ -271,6 +288,7 @@ class LocalHFQuestionGenerator(QGBackend):
         return q
 
     def _is_valid_question(self, q: str) -> bool:
+        """Reject malformed or obviously low-quality question outputs."""
         if not q:
             return False
         if "|" in q:
@@ -294,6 +312,7 @@ class LocalHFQuestionGenerator(QGBackend):
         return True
 
     def _dedupe(self, items: Sequence[str]) -> List[str]:
+        """Remove duplicate questions while preserving first-seen order."""
         out: List[str] = []
         for q in items:
             if not self._is_duplicate(q, out):
@@ -301,6 +320,7 @@ class LocalHFQuestionGenerator(QGBackend):
         return out
 
     def _is_duplicate(self, q: str, existing: Sequence[str]) -> bool:
+        """Check whether a question overlaps too heavily with an existing one."""
         qt = self._token_set(q)
         if not qt:
             return True
@@ -318,10 +338,12 @@ class LocalHFQuestionGenerator(QGBackend):
         return False
 
     def _token_set(self, s: str) -> set[str]:
+        """Return the token set used for simple overlap-based deduplication."""
         toks = re.findall(r"[a-zA-Z0-9]+", s.lower())
         return set(toks)
 
     def _allocate_budgets(self, target: int, num_chunks: int) -> List[int]:
+        """Assign a simple per-chunk question budget for generation passes."""
         if num_chunks <= 0:
             return []
 
@@ -338,4 +360,5 @@ class LocalHFQuestionGenerator(QGBackend):
 
 
 def build_local_hf_qg(config: LocalHFQGConfig | None = None) -> LocalHFQuestionGenerator:
+    """Convenience factory for creating a local Hugging Face question generator."""
     return LocalHFQuestionGenerator(config=config)

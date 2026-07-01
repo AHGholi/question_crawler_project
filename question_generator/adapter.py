@@ -1,3 +1,9 @@
+"""Adapter layer that connects extracted document content to question-generation backends.
+
+This module prepares a normalized input payload, filters noisy model output, and
+builds question items that fit the project's data model.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -44,6 +50,8 @@ class _AdapterConfig:
 
 
 class PipelineQuestionGenerator:
+    """Wrap a question-generation backend with filtering and document-aware formatting."""
+
     def __init__(
         self,
         backend: QGBackend,
@@ -55,6 +63,7 @@ class PipelineQuestionGenerator:
         self.config.max_questions_default = int(default_num_questions)
 
     def __call__(self, extraction: ExtractionResult, num_questions: Optional[int] = None) -> QuestionSet:
+        """Generate a question set for a single extraction result."""
         target = max(int(num_questions or self.config.max_questions_default), 1)
 
         qg_input = self._build_qg_input(extraction, target)
@@ -95,6 +104,7 @@ class PipelineQuestionGenerator:
         )
 
     def _build_qg_input(self, extraction: ExtractionResult, target: int) -> QGInput:
+        """Convert an extraction result into the structured payload expected by backends."""
         title = (extraction.document.title or "").strip() if extraction.document else ""
         topic = title or "Document"
 
@@ -146,6 +156,7 @@ class PipelineQuestionGenerator:
         )
 
     def _normalize_and_filter(self, raw_questions: Sequence[str]) -> List[str]:
+        """Clean generated candidates and remove empty, invalid, or duplicate questions."""
         kept: List[str] = []
 
         drop_empty = 0
@@ -183,6 +194,7 @@ class PipelineQuestionGenerator:
         return kept
 
     def _split_question_answer(self, raw: str) -> tuple[str, str]:
+        """Separate a question from an answer when the backend returns QA pairs."""
         text = _norm_ws(raw)
 
         if "||" in text or "|" in text:
@@ -201,6 +213,7 @@ class PipelineQuestionGenerator:
         return text, ""
 
     def _normalize_question(self, text: str) -> str:
+        """Normalize casing and punctuation for a candidate question."""
         t = _norm_ws(text)
         t = _TRAIL_PUNCT_RE.sub("", t).strip()
         if not t:
@@ -212,6 +225,7 @@ class PipelineQuestionGenerator:
         return t
 
     def _is_valid_question(self, q: str) -> bool:
+        """Reject statements and generic prompts that are not useful study questions."""
         if not q:
             return False
         if len(q) < self.config.min_question_len or len(q) > self.config.max_question_len:
@@ -229,6 +243,7 @@ class PipelineQuestionGenerator:
         return not any(ql.startswith(g) for g in generic)
 
     def _is_duplicate(self, q: str, existing: Sequence[str]) -> bool:
+        """Check whether a question overlaps too much with those already kept."""
         qt = _token_set(q)
         if not qt:
             return False
@@ -243,6 +258,7 @@ class PipelineQuestionGenerator:
         return False
 
     def _build_question_items(self, questions: Sequence[str], extraction: ExtractionResult) -> List[QuestionItem]:
+        """Create the structured QuestionItem objects used by the rest of the pipeline."""
         items: List[QuestionItem] = []
         sentence_pool = extraction.top_sentences or []
 
@@ -265,6 +281,7 @@ class PipelineQuestionGenerator:
         return items
 
     def _best_source_for_question(self, question: str, sentences: Sequence[str]) -> tuple[Optional[str], float]:
+        """Find the sentence in the document that best matches a generated question."""
         if not sentences:
             return None, 0.35
 
@@ -291,6 +308,7 @@ class PipelineQuestionGenerator:
         return best_s, confidence
 
     def _fallback_answer(self, source_sentence: Optional[str], extraction: ExtractionResult) -> str:
+        """Create a simple fallback answer when the model does not provide one."""
         if source_sentence and source_sentence.strip():
             return source_sentence.strip()
         if extraction.summary and extraction.summary.strip():

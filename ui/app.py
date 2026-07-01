@@ -1,4 +1,8 @@
-# ui\app.py
+"""Streamlit-based UI for running the document question-generation pipeline.
+
+This module wires together the pipeline execution, question rendering, and
+export helpers so users can inspect results and download them in common formats.
+"""
 
 from __future__ import annotations
 
@@ -32,19 +36,23 @@ from processor.pipeline import PipelineContext
 # Compatibility helpers
 # -----------------------------
 def _question_text(q: Any) -> str:
+    """Return the question text from a question-like object regardless of attribute name."""
     return (getattr(q, "question", None) or getattr(q, "prompt", None) or "").strip()
 
 
 def _question_answer(q: Any) -> str:
+    """Return the answer text from a question-like object if available."""
     return (getattr(q, "answer", None) or "").strip()
 
 
 def _question_metadata(q: Any) -> dict:
+    """Return metadata from a question object when it is stored as a dictionary."""
     md = getattr(q, "metadata", None)
     return md if isinstance(md, dict) else {}
 
 
 def _iter_questions(ctx: PipelineContext) -> Iterable[Any]:
+    """Yield the question items stored in a pipeline context if present."""
     if not ctx or not ctx.questions:
         return []
     items = getattr(ctx.questions, "questions", None)
@@ -52,6 +60,7 @@ def _iter_questions(ctx: PipelineContext) -> Iterable[Any]:
 
 
 def _safe_title(ctx: PipelineContext) -> str:
+    """Return a display-friendly title for the current document context."""
     title = getattr(ctx.document, "title", None) if ctx and ctx.document else None
     if title and str(title).strip():
         return str(title).strip()
@@ -86,6 +95,7 @@ _UI_REPEAT_STEM_SPLIT = re.compile(
 
 
 def _clean_question_text(text: str) -> str:
+    """Normalize a raw question string before it is shown in the UI."""
     t = (text or "").strip()
     if not t:
         return ""
@@ -108,6 +118,7 @@ def _clean_question_text(text: str) -> str:
 
 
 def _is_displayable_question(text: str) -> bool:
+    """Decide whether a cleaned question should be displayed to the user."""
     t = (text or "").strip()
     if not t:
         return False
@@ -132,6 +143,7 @@ def _is_displayable_question(text: str) -> bool:
 
 
 def _clean_answer_text(text: str) -> str:
+    """Normalize answer text and suppress placeholder values such as 'N/A'."""
     t = (text or "").strip()
     if not t:
         return ""
@@ -144,6 +156,7 @@ def _clean_answer_text(text: str) -> str:
 
 
 def _split_merged_questions(text: str) -> list[str]:
+    """Split merged question text that contains multiple questions in one block."""
     t = (text or "").strip()
     if not t:
         return []
@@ -180,6 +193,7 @@ def _split_merged_questions(text: str) -> list[str]:
 
 
 def _visible_questions(ctx: PipelineContext) -> list[tuple[str, str, dict]]:
+    """Return the cleaned questions that should be rendered for a pipeline context."""
     out: list[tuple[str, str, dict]] = []
 
     for q in _iter_questions(ctx):
@@ -212,6 +226,7 @@ def _visible_questions(ctx: PipelineContext) -> list[tuple[str, str, dict]]:
 # Export helpers
 # -----------------------------
 def question_set_to_docx(contexts: list[PipelineContext]) -> bytes:
+    """Export the visible questions for multiple contexts into a DOCX document."""
     doc = DocxDocument()
     doc.add_heading("Generated Questions", level=1)
 
@@ -240,6 +255,7 @@ def question_set_to_docx(contexts: list[PipelineContext]) -> bytes:
 
 
 def question_set_to_pdf(contexts: list[PipelineContext]) -> bytes:
+    """Export the visible questions for multiple contexts into a PDF document."""
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     page_w, page_h = A4
@@ -347,6 +363,7 @@ def question_set_to_pdf(contexts: list[PipelineContext]) -> bytes:
 # UI Rendering
 # -----------------------------
 def render_context(ctx: PipelineContext, idx: int) -> None:
+    """Render the question results for one document context in the Streamlit UI."""
     title = _safe_title(ctx)
     with st.expander(f"{idx}. {title}", expanded=False):
         if ctx.errors:
@@ -374,6 +391,7 @@ def render_context(ctx: PipelineContext, idx: int) -> None:
 
 
 def _stats_block(result: MainPipelineResult) -> None:
+    """Render a small summary block for the pipeline execution statistics."""
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Total documents", result.stats.total_documents)
     col2.metric("Processed", result.stats.processed_documents)
@@ -385,6 +403,7 @@ def _stats_block(result: MainPipelineResult) -> None:
 # Main app
 # -----------------------------
 def main() -> None:
+    """Run the Streamlit application and handle the full user workflow."""
     st.set_page_config(page_title="Question Generator", layout="wide")
     st.title("Document Question Generator")
 

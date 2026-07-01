@@ -1,23 +1,29 @@
 # Question Crawler Project
 
-This repository is a document crawl → extract → process → question generation pipeline.
+This repository implements a document crawl → extract → process → question generation pipeline.
 
-## Current runtime state
+## Current runtime flow
 
-- The pipeline crawls HTML pages from search results and stores them under `downloaded_files/`.
-- The extractor phase is active: `extractor/html_extractor.py` parses HTML and produces `ExtractionResult` objects.
-- The processor phase is active: `processor/` ranks sentences and computes keywords.
-- The question generation module is currently a placeholder; it is not using the legacy `question_generator_old/` code path.
-- `question_generator_old/` is kept for reference only and is not executed by the current main pipeline.
+The active question-generation path is:
+
+1. [main.py](main.py) chooses either a web search crawler or a local-file crawler.
+2. [main_pipeline.py](main_pipeline.py) runs each discovered document through the processing pipeline.
+3. The extractor layer produces an [utils/models.py](utils/models.py) extraction result from HTML or text input.
+4. The processor layer ranks sentences, extracts keywords, and prepares context for question generation.
+5. The question generation adapter in [question_generator/adapter.py](question_generator/adapter.py) builds the input payload and filters the generated questions.
+6. The actual backend is either:
+   - [question_generator/local_hf_qg.py](question_generator/local_hf_qg.py) for a locally loaded Hugging Face model, or
+   - [question_generator/hf_qg.py](question_generator/hf_qg.py) for the Hugging Face inference API.
 
 ## Project structure
 
-- `crawler/`: search + download logic, API client adapters, URL filtering, robots handling.
-- `extractor/`: HTML/PDF/text extraction and cleaning.
-- `processor/`: pipeline orchestration, sentence ranking, vectorization, similarity.
-- `ui/`: Streamlit app (`ui/app.py`) and CLI wrapper (`ui/cli.py`).
-- `utils/`: shared data models, config loading, logging, retry helpers.
-- `downloaded_files/`: downloaded HTML pages from crawler runs.
+- [crawler](crawler): search and download logic, URL filtering, robots handling, and API client adapters.
+- [extractor](extractor): HTML, text, PDF, and document extraction plus cleaning helpers.
+- [processor](processor): sentence ranking, tokenization, vectorization, similarity, and relevance scoring.
+- [question_generator](question_generator): the current question-generation adapter and backends.
+- [ui](ui): Streamlit app and CLI wrapper.
+- [utils](utils): shared models, configuration helpers, retry logic, and text utilities.
+- [downloaded_files](downloaded_files): downloaded HTML pages produced during crawler runs.
 
 ## Setup
 
@@ -51,3 +57,8 @@ python ui/cli.py --query "machine learning"
 ```powershell
 streamlit run ui/app.py
 ```
+
+## Notes on unused or non-runtime helpers
+
+- [utils/export_documents.py](utils/export_documents.py) is an auxiliary export helper for creating JSON fixtures. It is not part of the standard runtime question-generation path and is only relevant if you need fixture export for testing or integration work.
+- The repository currently uses the adapter-based question-generation flow in [question_generator/adapter.py](question_generator/adapter.py). Older or stale references to a legacy generator module were found only in tests and do not correspond to a runtime module in the current codebase.

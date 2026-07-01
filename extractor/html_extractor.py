@@ -1,4 +1,9 @@
-# extractor/html_extractor.py
+"""HTML extraction logic for turning downloaded pages into readable text.
+
+The extractor removes navigation and advertisement noise, identifies the most
+likely content region, and produces a cleaned document representation.
+"""
+
 from __future__ import annotations
 
 import re
@@ -56,11 +61,13 @@ class HTMLExtractor:
     )
 
     def supports(self, document: DocumentRecord) -> bool:
+        """Return True when the document appears to be an HTML page."""
         mt = (document.media_type or "").lower()
         path = str(document.path or document.source_path or "").lower()
         return "html" in mt or path.endswith(".html") or path.endswith(".htm")
 
     def extract(self, document: DocumentRecord) -> ExtractionResult:
+        """Extract the main article content from an HTML document."""
         html = document.content or ""
 
         if not html:
@@ -102,6 +109,7 @@ class HTMLExtractor:
         )
 
     def _remove_noise(self, soup: BeautifulSoup) -> None:
+        """Remove non-content elements such as scripts, forms, and sidebars."""
         # 1) Drop hard non-content tags
         for tag_name in self._DROP_TAGS:
             for node in soup.find_all(tag_name):
@@ -175,6 +183,7 @@ class HTMLExtractor:
                 node.decompose()
 
     def _pick_content_root(self, soup: BeautifulSoup) -> Optional[Tag]:
+        """Find the most likely container that holds the page's main content."""
         # Put site-specific and semantic selectors first
         selectors = [
             ".MainArticleContent_articleMainContentCss__b_1_R",  # GfG
@@ -226,6 +235,7 @@ class HTMLExtractor:
         return soup.body if soup.body is not None else soup
 
     def _split_sentences(self, text: str) -> List[str]:
+        """Split extracted text into candidate sentences for later summarization."""
         if not text:
             return []
 
@@ -250,6 +260,7 @@ class HTMLExtractor:
         return out
 
     def _build_summary(self, sentences: List[str]) -> Optional[str]:
+        """Create a short summary from the first meaningful sentences."""
         if not sentences:
             return None
         return sentences[0][:320]

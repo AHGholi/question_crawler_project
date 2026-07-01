@@ -1,4 +1,8 @@
-# question_generator/hf_qg.py
+"""Question generation backend that calls the Hugging Face Inference API.
+
+This backend is useful when the project wants a hosted model without running a
+local transformer locally.
+"""
 
 from __future__ import annotations
 import json
@@ -11,13 +15,10 @@ from .base import QGBackend, QGInput
 
 
 class HFQuestionGenerator(QGBackend):
-    """
-    Hugging Face Inference API based question generator.
+    """Generate questions by posting a prompt to the Hugging Face inference API.
 
-    Works well with instruct/text-generation models.
-    Example model:
-      mistralai/Mistral-7B-Instruct-v0.2
-      google/flan-t5-large
+    This backend is suitable for instruct-style or text-generation models such as
+    mistralai/Mistral-7B-Instruct-v0.2 or google/flan-t5-large.
     """
 
     def __init__(
@@ -39,13 +40,14 @@ class HFQuestionGenerator(QGBackend):
         self.url = f"https://api-inference.huggingface.co/models/{self.model}"
 
     def _headers(self) -> Dict[str, str]:
+        """Return the HTTP headers required for authenticated inference requests."""
         return {
             "Authorization": f"Bearer {self.api_token}",
             "Content-Type": "application/json",
         }
 
     def _build_prompt(self, data: QGInput) -> str:
-        # keep prompt concise and deterministic
+        """Build a compact prompt that instructs the model to generate questions."""
         keywords = ", ".join(data.keywords[:20]) if data.keywords else ""
         sentences = "\n".join(f"- {s}" for s in data.sentences[:20])
 
@@ -60,6 +62,7 @@ class HFQuestionGenerator(QGBackend):
         )
 
     def _call_hf(self, prompt: str) -> Any:
+        """Send the prompt to the Hugging Face endpoint and return the JSON response."""
         payload = {
             "inputs": prompt,
             "parameters": {
@@ -81,6 +84,7 @@ class HFQuestionGenerator(QGBackend):
 
     @staticmethod
     def _extract_text(response_json: Any) -> str:
+        """Extract the generated text from the model response in a backend-agnostic way."""
         # HF responses vary by model/task
         if isinstance(response_json, list) and response_json:
             item = response_json[0]
@@ -98,6 +102,7 @@ class HFQuestionGenerator(QGBackend):
 
     @staticmethod
     def _parse_questions(text: str, expected: int) -> List[str]:
+        """Parse numbered or bulleted lines from the model output into question strings."""
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
         cleaned: List[str] = []
 
@@ -122,6 +127,7 @@ class HFQuestionGenerator(QGBackend):
         return uniq[:expected]
 
     def generate(self, data: QGInput) -> List[str]:
+        """Generate questions for a document summary and its extracted context."""
         prompt = self._build_prompt(data)
         raw = self._call_hf(prompt)
         text = self._extract_text(raw)

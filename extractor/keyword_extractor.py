@@ -1,4 +1,9 @@
-# extractor/keyword_extractor.py
+"""Keyword extraction utilities for identifying salient terms in text.
+
+The extractor tokenizes the document, removes stopwords, and ranks unigrams
+and bigrams so the processor can attach meaningful keywords to each result.
+"""
+
 from __future__ import annotations
 
 import math
@@ -201,13 +206,7 @@ class KeywordResult:
 
 
 class KeywordExtractor:
-    """
-    Standalone keyword extractor:
-      - tokenizes text
-      - builds unigrams + bigrams
-      - scores candidates
-      - returns high-scoring terms (no fixed top-K; dynamic threshold with safety minimum)
-    """
+    """Extract meaningful keywords from a document using frequency-based ranking."""
 
     def __init__(
         self,
@@ -233,6 +232,7 @@ class KeywordExtractor:
         self.bigram_boost = bigram_boost
 
     def run(self, text: str, *, title: Optional[str] = None) -> KeywordResult:
+        """Extract keywords and the token list for a document body and optional title."""
         # Tokenize full text (lowercased for scoring; we keep casing only for entities elsewhere)
         tokens_all = self._tokenize(text.lower())
         if not tokens_all:
@@ -317,6 +317,7 @@ class KeywordExtractor:
 
     @staticmethod
     def _tokenize(text: Optional[str]) -> List[str]:
+        """Split text into normalized word-like tokens."""
         if not text:
             return []
         return WORD_RE.findall(text)
