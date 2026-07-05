@@ -1,3 +1,4 @@
+# processor\vectorizer.py
 """TF-IDF vectorization helpers for the processor subsystem.
 
 This module turns tokenized text into sparse vectors that can be compared for

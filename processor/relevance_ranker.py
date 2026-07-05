@@ -1,3 +1,4 @@
+# processor\relevance_ranker.py
 """Relevance ranking utilities for ordering documents by query similarity.
 
 This module performs lightweight TF-IDF style ranking using the processor

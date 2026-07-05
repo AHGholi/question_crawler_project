@@ -1,3 +1,5 @@
+# crawler\robots.py
+
 """Support for consulting robots.txt rules before crawling a site.
 
 The crawler uses this module to respect site policies and avoid excessive

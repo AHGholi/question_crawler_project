@@ -23,6 +23,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-results", type=int, default=5, help="Maximum search results to crawl")
     parser.add_argument("--limit", type=int, default=0, help="Document processing limit (0 = no limit)")
     parser.add_argument("--show-qa", action="store_true", help="Print generated question/answer pairs")
+
+    parser.add_argument(
+        "--qg-provider",
+        choices=["local_hf", "hf_api"],
+        default="local_hf",
+        help="Question-generation backend",
+    )
+    parser.add_argument(
+        "--qg-model",
+        default="google/flan-t5-large",
+        help="Hugging Face model name",
+    )
+    parser.add_argument(
+        "--hf-api-token",
+        default=None,
+        help="Hugging Face API token (optional; env var can also be used)",
+    )
+
     return parser.parse_args()
 
 
@@ -69,7 +87,11 @@ def main() -> None:
         max_results=args.max_results,
         limit=limit,
         input_files=args.input_files,
+        qg_provider=args.qg_provider,
+        qg_model=args.qg_model,
+        qg_api_token=args.hf_api_token,
     )
+
 
     print("Processed documents:", result.stats.processed_documents)
     print("Failed documents:", result.stats.failed_documents)

@@ -1,3 +1,5 @@
+# extractor\cleaner.py
+
 """Text-cleaning helpers used by the extractor modules.
 
 These utilities normalize and strip irrelevant markup so the downstream

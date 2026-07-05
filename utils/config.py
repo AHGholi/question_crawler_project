@@ -1,3 +1,4 @@
+# utils\config.py
 """Configuration loading helpers for the crawler pipeline.
 
 This module reads YAML settings from disk or environment variables and exposes a

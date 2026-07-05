@@ -22,12 +22,14 @@ from crawler.search import run_search
 from extractor.html_extractor import HTMLExtractor
 from extractor.keyword_extractor import KeywordExtractor
 from extractor.text_extractor import TextExtractor
+from extractor.pdf_extractor import PDFExtractor
+from extractor.doc_extractor import DOCDocxExtractor
 
-from main_pipeline import MainPipeline, MainPipelineResult, PipelineContext
+from main_pipeline import MainPipeline, MainPipelineResult
 from processor.pipeline import ProcessorPipeline
 from processor.sentence_ranking import SentenceRankingService
 from question_generator.adapter import PipelineQuestionGenerator
-from question_generator.hf_qg import HFQuestionGenerator
+from question_generator.hf_qg import HFQuestionGenerator, HFQGConfig
 from utils.config import get_setting
 from utils.models import DocumentRecord, ExtractionResult
 
@@ -42,22 +44,20 @@ load_dotenv()
 
 
 def crawl_documents(query: str, max_results: int) -> Iterator[DocumentRecord]:
-    """Convert search results into document records for downstream processing.
+    """Convert search results into document records for downstream processing."""
+    logging.info("Running search pipeline for query=%r (target_successes=%s)", query, max_results)
 
-    The crawler returns raw search payloads with download metadata. This adapter
-    filters out failed downloads and turns the remaining items into the
-    standardized DocumentRecord objects expected by the processing pipeline.
-    """
-    logging.info("Running search pipeline for query=%r (max_results=%s)", query, max_results)
-    search_results = run_search(query, max_results=max_results)
+    search_results = run_search(query, max_results=max_results * 3)
+    yielded = 0
 
     for idx, payload in enumerate(search_results, start=1):
-        # Each search result may contain a download payload; only successful downloads become documents.
+        if yielded >= max_results:
+            break
+
         download = payload.get("download") or {}
         status = download.get("status", "unknown")
 
         if status != "ok":
-            # Skip search hits that failed to download or were blocked by the crawler.
             logging.warning(
                 "Skipping search result %s; download status=%s reason=%s",
                 idx,
@@ -68,22 +68,25 @@ def crawl_documents(query: str, max_results: int) -> Iterator[DocumentRecord]:
 
         path_value = download.get("path")
         if not path_value:
-            # Some successful-looking payloads still do not contain a usable local file path.
             logging.warning("Skipping search result %s; missing download path.", idx)
             continue
 
         path = Path(path_value)
         if not path.exists():
-            # The search result may have been recorded, but the file no longer exists locally.
             logging.warning("Skipping search result %s; file not found at %s", idx, path)
             continue
 
+        content_type = download.get("content_type")
+        if not content_type:
+            logging.warning("Skipping search result %s; missing content_type.", idx)
+            continue
+
         metadata: dict[str, str] = {}
-        # Carry over the most useful metadata so downstream stages have context about the source.
         for key, value in (
             ("snippet", payload.get("snippet")),
             ("search_link", payload.get("search_link")),
             ("download_url", download.get("url")),
+            ("final_url", download.get("final_url")),
             ("rank", str(idx)),
         ):
             if value:
@@ -93,17 +96,19 @@ def crawl_documents(query: str, max_results: int) -> Iterator[DocumentRecord]:
             id=uuid4().hex,
             title=payload.get("title"),
             metadata=metadata,
-            media_type="text/html",
+            media_type=str(content_type),
             path=path,
             source_path=path,
             encoding="utf-8",
         )
 
+        yielded += 1
         logging.debug(
-            "Yielding DocumentRecord(id=%s, title=%r, path=%s)",
+            "Yielding DocumentRecord(id=%s, title=%r, path=%s, media_type=%s)",
             document.id,
             document.title,
             document.path,
+            document.media_type,
         )
         yield document
 
@@ -117,33 +122,43 @@ def build_crawler(query: str, max_results: int):
 
     return _crawler
 
-def build_question_generator() -> Optional[PipelineQuestionGenerator]:
+def build_question_generator(
+    provider: str | None = None,
+    model: str | None = None,
+    hf_api_token: str | None = None,
+    num_questions: int | None = None,
+    temperature: float | None = None,
+    max_new_tokens: int | None = None,
+    min_new_tokens: int | None = None,
+    do_sample: bool | None = None,
+    top_p: float | None = None,
+    num_beams: int | None = None,
+    device: int | None = None,
+    timeout: int | None = None,
+) -> Optional[PipelineQuestionGenerator]:
     """Create the configured question generator backend for the pipeline.
 
-    The selected provider can be a local Hugging Face model or the remote
-    Hugging Face API, depending on configuration.
+    Runtime arguments take precedence over config values, so the UI/CLI can
+    choose the backend dynamically.
     """
-    # Read the runtime options from configuration so the same code path works with
-    # different backends and model settings without extra branching in the caller.
     qg_enabled = get_setting("question_generator", "enabled", default=True)
     if not qg_enabled:
-        # The pipeline can be run without question generation when the feature is disabled.
         logging.info("Question generation disabled via config.")
         return None
 
-    provider = str(get_setting("question_generator", "provider", default="local_hf")).lower().strip()
-    num_questions = int(get_setting("question_generator", "num_questions", default=10))
-    model = str(get_setting("question_generator", "model", default="google/flan-t5-small"))
-    temperature = float(get_setting("question_generator", "temperature", default=0.7))
-    max_new_tokens = int(get_setting("question_generator", "max_new_tokens", default=320))
-    min_new_tokens = int(get_setting("question_generator", "min_new_tokens", default=12))
-    do_sample = bool(get_setting("question_generator", "do_sample", default=True))
-    top_p = float(get_setting("question_generator", "top_p", default=0.9))
-    num_beams = int(get_setting("question_generator", "num_beams", default=4))
-    device = int(get_setting("question_generator", "device", default=-1))
+    provider = (provider or get_setting("question_generator", "provider", default="local_hf")).lower().strip()
+    num_questions = int(num_questions if num_questions is not None else get_setting("question_generator", "num_questions", default=10))
+    model = str(model or get_setting("question_generator", "model", default="google/flan-t5-large"))
+    temperature = float(temperature if temperature is not None else get_setting("question_generator", "temperature", default=0.7))
+    max_new_tokens = int(max_new_tokens if max_new_tokens is not None else get_setting("question_generator", "max_new_tokens", default=320))
+    min_new_tokens = int(min_new_tokens if min_new_tokens is not None else get_setting("question_generator", "min_new_tokens", default=12))
+    do_sample = bool(do_sample if do_sample is not None else get_setting("question_generator", "do_sample", default=True))
+    top_p = float(top_p if top_p is not None else get_setting("question_generator", "top_p", default=0.9))
+    num_beams = int(num_beams if num_beams is not None else get_setting("question_generator", "num_beams", default=4))
+    device = int(device if device is not None else get_setting("question_generator", "device", default=-1))
+    timeout = int(timeout if timeout is not None else get_setting("question_generator", "timeout", default=60))
 
     if provider == "local_hf":
-        # Use the locally installed transformer when the configuration selects the local backend.
         cfg = LocalHFQGConfig(
             model_name=model,
             device=device,
@@ -157,65 +172,119 @@ def build_question_generator() -> Optional[PipelineQuestionGenerator]:
         backend = LocalHFQuestionGenerator(config=cfg)
         return PipelineQuestionGenerator(backend=backend, default_num_questions=num_questions)
 
-    if provider == "huggingface":
-        # The remote backend needs a token from the environment before the API call can be made.
+    if provider in {"huggingface", "hf_api", "api"}:
         token_env = get_setting("question_generator", "hf_api_token_env", default="HF_API_TOKEN")
-        hf_token = os.getenv(token_env)
-        if not hf_token:
-            # Fail early with a clear message if the required authentication is missing.
-            raise RuntimeError(f"Missing Hugging Face token. Set env var {token_env} in your .env file.")
+        resolved_token = (hf_api_token or "").strip() or os.getenv(token_env)
 
-        timeout = int(get_setting("question_generator", "timeout", default=60))
+        if not resolved_token:
+            raise RuntimeError(
+                f"Missing Hugging Face token. Provide it in the UI/CLI or set env var {token_env} in your .env file."
+            )
+
         backend = HFQuestionGenerator(
-            api_token=hf_token,
-            model=model,
-            timeout=timeout,
-            temperature=temperature,
-            max_new_tokens=max_new_tokens,
+            config=HFQGConfig(
+                api_token=resolved_token,
+                model_name=model,
+                timeout=timeout or 60,
+                max_new_tokens=max_new_tokens or 96,
+            )
         )
+
         return PipelineQuestionGenerator(backend=backend, default_num_questions=num_questions)
 
     raise ValueError(f"Unsupported question generator provider: {provider}")
 
 
-def build_processor_pipeline() -> ProcessorPipeline:
+def build_processor_pipeline(
+    qg_provider: str | None = None,
+    qg_model: str | None = None,
+    qg_api_token: str | None = None,
+    qg_num_questions: int | None = None,
+    qg_temperature: float | None = None,
+    qg_max_new_tokens: int | None = None,
+    qg_min_new_tokens: int | None = None,
+    qg_do_sample: bool | None = None,
+    qg_top_p: float | None = None,
+    qg_num_beams: int | None = None,
+    qg_device: int | None = None,
+    qg_timeout: int | None = None,
+) -> ProcessorPipeline:
     """Assemble the processing pipeline with extraction, ranking, and optional question generation."""
-    # Compose the concrete processing stages that will be executed for each document.
     html_extractor = HTMLExtractor()
     text_extractor = TextExtractor()
+    pdf_extractor = PDFExtractor()
+    doc_extractor = DOCDocxExtractor()
+
     ranking_service = SentenceRankingService()
     keyword_extractor = KeywordExtractor()
-    qg_adapter = build_question_generator()
+    qg_adapter = build_question_generator(
+        provider=qg_provider,
+        model=qg_model,
+        hf_api_token=qg_api_token,
+        num_questions=qg_num_questions,
+        temperature=qg_temperature,
+        max_new_tokens=qg_max_new_tokens,
+        min_new_tokens=qg_min_new_tokens,
+        do_sample=qg_do_sample,
+        top_p=qg_top_p,
+        num_beams=qg_num_beams,
+        device=qg_device,
+        timeout=qg_timeout,
+    )
 
     def extractor_step(document: DocumentRecord) -> ExtractionResult:
-        # Use the first extractor that reports support for the current document type.
-        for extractor in (html_extractor, text_extractor):
-            if extractor.supports(document):
-                # Once a suitable extractor is found, stop and return its extraction result.
-                return extractor.extract(document)
+        media_type = (document.media_type or "").strip().lower()
+
+        if media_type in {"text/html", "application/xhtml+xml"}:
+            return html_extractor.extract(document)
+
+        if media_type == "text/plain":
+            return text_extractor.extract(document)
+
+        if media_type == "application/pdf":
+            return pdf_extractor.extract(document)
+
+        if media_type in {
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/doc",
+            "application/x-msword",
+            "application/vnd.ms-word",
+            "application/x-docx",
+        }:
+            return doc_extractor.extract(document)
+
+        suffix = document.path.suffix.lower() if document.path else ""
+
+        if suffix in {".html", ".htm"}:
+            return html_extractor.extract(document)
+
+        if suffix == ".txt":
+            return text_extractor.extract(document)
+
+        if suffix == ".pdf":
+            return pdf_extractor.extract(document)
+
+        if suffix in {".doc", ".docx"}:
+            return doc_extractor.extract(document)
+
         raise ValueError(
-            f"Unsupported document for extraction: {document.id} media_type={document.media_type} path={document.path}"
+            f"Unsupported document for extraction: {document.id} "
+            f"media_type={document.media_type} path={document.path}"
         )
 
     def ranking_step(extraction: ExtractionResult) -> ExtractionResult:
-        # Extract keywords and sentence-level evidence before ranking the passage.
         text = extraction.clean_text or extraction.raw_text or ""
-        # The keyword extractor produces the tokens and scores used by the ranking stage.
         kr = keyword_extractor.run(text, title=extraction.document.title or "")
         extraction.tokens = kr.tokens
         extraction.keywords = kr.keywords
         extraction.keyword_scores = kr.scores
         return ranking_service.rank(extraction)
 
-    # Wrapper to satisfy ProcessorPipeline QuestionGeneratorStep protocol:
-    # expected signature: (extraction, summary=None) -> QuestionSet | None
     def question_generator_step(extraction: ExtractionResult, summary: str | None = None):
-        # Question generation is optional and should be skipped cleanly when disabled.
         if qg_adapter is None:
-            # Returning None keeps the processor pipeline contract intact while disabling the feature.
             return None
         if summary and not extraction.summary:
-            # Reuse a supplied summary when the extraction already has no summary of its own.
             extraction.summary = summary
         return qg_adapter(extraction)
 
@@ -244,20 +313,18 @@ def build_file_crawler(file_paths: list[str]):
             title = path.stem
             suffix = path.suffix.lower()
             if suffix in {".html", ".htm"}:
-                # HTML inputs are treated as web-like content that can be parsed by the extractor.
                 media_type = "text/html"
             elif suffix == ".txt":
-                # Plain text files are passed through the textual extractor path.
                 media_type = "text/plain"
+            elif suffix == ".pdf":
+                media_type = "application/pdf"
             elif suffix == ".docx":
-                # Word documents use the Office Open XML media type.
                 media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             elif suffix == ".doc":
-                # Legacy Word documents use the older binary document media type.
                 media_type = "application/msword"
             else:
-                # Unsupported extensions are still accepted as opaque documents but will be handled conservatively.
                 media_type = "application/octet-stream"
+
             yield DocumentRecord(
                 id=uuid4().hex,
                 title=title,
@@ -276,20 +343,44 @@ def run_main_pipeline(
     max_results: int = 5,
     limit: Optional[int] = None,
     input_files: list[str] | None = None,
+    qg_provider: str | None = None,
+    qg_model: str | None = None,
+    qg_api_token: str | None = None,
+    qg_num_questions: int | None = None,
+    qg_temperature: float | None = None,
+    qg_max_new_tokens: int | None = None,
+    qg_min_new_tokens: int | None = None,
+    qg_do_sample: bool | None = None,
+    qg_top_p: float | None = None,
+    qg_num_beams: int | None = None,
+    qg_device: int | None = None,
+    qg_timeout: int | None = None,
 ) -> MainPipelineResult:
     """Run the full pipeline using either a search query or a list of local files."""
-    # Select the appropriate source of documents before constructing the orchestration layer.
     if input_files:
-        # Local files are processed directly when the caller supplies them.
         crawler = build_file_crawler(input_files)
     elif query is not None:
-        # A web search query is used when no explicit files are provided.
         crawler = build_crawler(query, max_results=max_results)
     else:
-        # This branch protects the public entry point from being called without any source input.
         raise ValueError("Either a search query or input_files must be provided.")
 
-    pipeline = MainPipeline(crawler=crawler, processor=build_processor_pipeline())
+    pipeline = MainPipeline(
+        crawler=crawler,
+        processor=build_processor_pipeline(
+            qg_provider=qg_provider,
+            qg_model=qg_model,
+            qg_api_token=qg_api_token,
+            qg_num_questions=qg_num_questions,
+            qg_temperature=qg_temperature,
+            qg_max_new_tokens=qg_max_new_tokens,
+            qg_min_new_tokens=qg_min_new_tokens,
+            qg_do_sample=qg_do_sample,
+            qg_top_p=qg_top_p,
+            qg_num_beams=qg_num_beams,
+            qg_device=qg_device,
+            qg_timeout=qg_timeout,
+        ),
+    )
     return pipeline.run(limit=limit)
 
 

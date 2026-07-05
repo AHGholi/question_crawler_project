@@ -1,3 +1,5 @@
+# extractor\html_extractor.py
+
 """HTML extraction logic for turning downloaded pages into readable text.
 
 The extractor removes navigation and advertisement noise, identifies the most

@@ -1,3 +1,4 @@
+# ui\app.py
 """Streamlit-based UI for running the document question-generation pipeline.
 
 This module wires together the pipeline execution, question rendering, and
@@ -413,6 +414,44 @@ def main() -> None:
         max_results = st.number_input("Max search results", min_value=1, max_value=50, value=5, step=1)
         limit = st.number_input("Process limit (0 = no limit)", min_value=0, max_value=100, value=0, step=1)
 
+        st.divider()
+        st.header("Question generation backend")
+
+        qg_provider = st.selectbox(
+            "Backend",
+            options=["local_hf", "hf_api"],
+            format_func=lambda x: "Local Hugging Face" if x == "local_hf" else "Hugging Face API",
+            index=0,
+        )
+
+        default_model = "google/flan-t5-large"
+        qg_model = st.text_input("Model", value=default_model)
+
+        with st.expander("Advanced generation settings", expanded=False):
+            qg_temperature = st.slider("Temperature", min_value=0.0, max_value=1.5, value=0.7, step=0.1)
+            qg_max_new_tokens = st.number_input("Max new tokens", min_value=16, max_value=1024, value=320, step=8)
+
+            if qg_provider == "local_hf":
+                qg_min_new_tokens = st.number_input("Min new tokens", min_value=1, max_value=256, value=12, step=1)
+                qg_do_sample = st.checkbox("Do sample", value=True)
+                qg_top_p = st.slider("Top-p", min_value=0.1, max_value=1.0, value=0.9, step=0.05)
+                qg_num_beams = st.number_input("Beam count", min_value=1, max_value=16, value=4, step=1)
+                qg_device = st.number_input("Device (-1 = CPU, 0 = first GPU)", min_value=-1, max_value=8, value=-1, step=1)
+                qg_timeout = None
+            else:
+                qg_min_new_tokens = None
+                qg_do_sample = None
+                qg_top_p = None
+                qg_num_beams = None
+                qg_device = None
+                qg_timeout = st.number_input("API timeout (seconds)", min_value=5, max_value=300, value=60, step=5)
+
+        if qg_provider == "hf_api":
+            qg_api_token = st.text_input("HF API token", value="", type="password")
+            st.caption("If left blank, the app will try the HF_API_TOKEN value from your .env/environment.")
+        else:
+            qg_api_token = None
+
         if "is_generating" not in st.session_state:
             st.session_state["is_generating"] = False
 
@@ -422,6 +461,8 @@ def main() -> None:
         st.session_state["last_result"] = None
     if "last_error" not in st.session_state:
         st.session_state["last_error"] = None
+    if "exports" not in st.session_state:
+        st.session_state["exports"] = None
 
     if run_btn and not st.session_state["is_generating"]:
         st.session_state["is_generating"] = True
@@ -429,14 +470,55 @@ def main() -> None:
         with st.spinner("Running pipeline..."):
             try:
                 limit_arg: Optional[int] = None if int(limit) == 0 else int(limit)
+
                 result = run_main_pipeline(
                     query=query.strip(),
                     max_results=int(max_results),
                     limit=limit_arg,
+                    qg_provider=qg_provider,
+                    qg_model=qg_model.strip(),
+                    qg_api_token=(qg_api_token.strip() if qg_api_token else None),
+                    qg_temperature=float(qg_temperature),
+                    qg_max_new_tokens=int(qg_max_new_tokens),
+                    qg_min_new_tokens=(int(qg_min_new_tokens) if qg_min_new_tokens is not None else None),
+                    qg_do_sample=qg_do_sample,
+                    qg_top_p=(float(qg_top_p) if qg_top_p is not None else None),
+                    qg_num_beams=(int(qg_num_beams) if qg_num_beams is not None else None),
+                    qg_device=(int(qg_device) if qg_device is not None else None),
+                    qg_timeout=(int(qg_timeout) if qg_timeout is not None else None),
                 )
                 st.session_state["last_result"] = result
+
+                contexts_with_questions = [c for c in result.contexts if len(_visible_questions(c)) > 0]
+
+                raw = []
+                for ctx in contexts_with_questions:
+                    visible = _visible_questions(ctx)
+                    raw.append(
+                        {
+                            "document_id": getattr(ctx.document, "id", None),
+                            "title": _safe_title(ctx),
+                            "questions": [
+                                {
+                                    "question": text,
+                                    "answer": "",
+                                    "metadata": md,
+                                }
+                                for (text, _ans, md) in visible
+                            ],
+                        }
+                    )
+
+                st.session_state["exports"] = {
+                    "has_questions": len(contexts_with_questions) > 0,
+                    "docx": question_set_to_docx(contexts_with_questions),
+                    "pdf": question_set_to_pdf(contexts_with_questions),
+                    "json": json.dumps(raw, ensure_ascii=False, indent=2).encode("utf-8"),
+                }
+
             except Exception as exc:
                 st.session_state["last_result"] = None
+                st.session_state["exports"] = None
                 st.session_state["last_error"] = f"{exc}\n\n{traceback.format_exc()}"
             finally:
                 st.session_state["is_generating"] = False
@@ -464,54 +546,43 @@ def main() -> None:
     st.divider()
     st.subheader("Export")
 
-    contexts_with_questions = [c for c in result.contexts if len(_visible_questions(c)) > 0]
+    exports = st.session_state.get("exports") or {
+        "has_questions": False,
+        "docx": b"",
+        "pdf": b"",
+        "json": b"",
+    }
 
     c1, c2, c3 = st.columns([1, 1, 2])
 
     with c1:
-        docx_bytes = question_set_to_docx(contexts_with_questions)
         st.download_button(
             "Download DOCX",
-            data=docx_bytes,
+            data=exports["docx"],
             file_name="generated_questions.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            disabled=len(contexts_with_questions) == 0,
+            disabled=not exports["has_questions"],
+            key="download_docx",
         )
 
     with c2:
-        pdf_bytes = question_set_to_pdf(contexts_with_questions)
         st.download_button(
             "Download PDF",
-            data=pdf_bytes,
+            data=exports["pdf"],
             file_name="generated_questions.pdf",
             mime="application/pdf",
-            disabled=len(contexts_with_questions) == 0,
+            disabled=not exports["has_questions"],
+            key="download_pdf",
         )
 
     with c3:
-        raw = []
-        for ctx in contexts_with_questions:
-            visible = _visible_questions(ctx)
-            raw.append(
-                {
-                    "document_id": getattr(ctx.document, "id", None),
-                    "title": _safe_title(ctx),
-                    "questions": [
-                        {
-                            "question": text,
-                            "answer": "",
-                            "metadata": md,
-                        }
-                        for (text, _ans, md) in visible
-                    ],
-                }
-            )
         st.download_button(
             "Download JSON",
-            data=json.dumps(raw, ensure_ascii=False, indent=2).encode("utf-8"),
+            data=exports["json"],
             file_name="generated_questions.json",
             mime="application/json",
-            disabled=len(contexts_with_questions) == 0,
+            disabled=not exports["has_questions"],
+            key="download_json",
         )
 
 

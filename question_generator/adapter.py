@@ -1,3 +1,4 @@
+# question_generator\adapter.py
 """Adapter layer that connects extracted document content to question-generation backends.
 
 This module prepares a normalized input payload, filters noisy model output, and

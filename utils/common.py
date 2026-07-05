@@ -1,5 +1,5 @@
+# utils\common.py
 """Small text-processing helpers used across the project."""
-
 from __future__ import annotations
 
 import re

@@ -1,3 +1,4 @@
+# question_generator\hf_pipe_factory.py
 """Factory helpers for constructing local Hugging Face text-to-text pipelines.
 
 The module wraps model loading so the question generator can use a simple

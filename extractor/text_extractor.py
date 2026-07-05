@@ -1,3 +1,5 @@
+# extractor\text_extractor.py
+
 """Text-file extraction for plain text documents.
 
 This module reads .txt files and produces the same extraction structure used

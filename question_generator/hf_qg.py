@@ -1,144 +1,165 @@
-"""Question generation backend that calls the Hugging Face Inference API.
-
-This backend is useful when the project wants a hosted model without running a
-local transformer locally.
-"""
-
+# question_generator\hf_qg.py
 from __future__ import annotations
-import json
-import re
-from typing import Any, Dict, List, Optional
+
+import logging
+from dataclasses import dataclass
+from typing import Any, List
 
 import requests
 
-from .base import QGBackend, QGInput
+from .chunked_hf_qg_base import ChunkedHFQuestionGeneratorBase, CommonChunkedHFQGConfigProto
+
+logger = logging.getLogger(__name__)
 
 
-class HFQuestionGenerator(QGBackend):
-    """Generate questions by posting a prompt to the Hugging Face inference API.
+@dataclass
+class HFQGConfig:
+    api_token: str = ""
+    model_name: str = "google/flan-t5-large"
+    timeout: int = 60
 
-    This backend is suitable for instruct-style or text-generation models such as
-    mistralai/Mistral-7B-Instruct-v0.2 or google/flan-t5-large.
-    """
+    max_new_tokens: int = 96
+    min_new_tokens: int = 12
+
+    do_sample: bool = False
+    temperature: float = 0.5
+    top_p: float = 0.9
+    num_beams: int = 4
+
+    per_chunk_min: int = 1
+    per_chunk_max: int = 1
+    max_chunks_used: int = 10
+
+    second_pass_enabled: bool = True
+    second_pass_limit: int = 8
+
+    max_question_chars: int = 180
+    min_question_chars: int = 18
+    dedupe_jaccard: float = 0.85
+
+
+class HFQuestionGenerator(ChunkedHFQuestionGeneratorBase):
+    backend_name = "hf_api"
 
     def __init__(
         self,
-        *,
-        api_token: str,
-        model: str = "google/flan-t5-large",
-        timeout: int = 60,
-        max_new_tokens: int = 256,
-        temperature: float = 0.3,
-    ) -> None:
-        if not api_token:
-            raise ValueError("HF API token is required.")
-        self.api_token = api_token
-        self.model = model
-        self.timeout = timeout
-        self.max_new_tokens = max_new_tokens
-        self.temperature = temperature
-        self.url = f"https://api-inference.huggingface.co/models/{self.model}"
+        api_token: str | None = None,
+        model: str | None = None,
+        timeout: int | None = None,
+        max_new_tokens: int | None = None,
+        min_new_tokens: int | None = None,
+        do_sample: bool | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        num_beams: int | None = None,
+        config: HFQGConfig | None = None,
+    ):
+        if config is None:
+            config = HFQGConfig(
+                api_token=api_token or "",
+                model_name=model or "google/flan-t5-large",
+                timeout=timeout or 60,
+            )
+            if max_new_tokens is not None:
+                config.max_new_tokens = max_new_tokens
+            if min_new_tokens is not None:
+                config.min_new_tokens = min_new_tokens
+            if do_sample is not None:
+                config.do_sample = do_sample
+            if temperature is not None:
+                config.temperature = temperature
+            if top_p is not None:
+                config.top_p = top_p
+            if num_beams is not None:
+                config.num_beams = num_beams
 
-    def _headers(self) -> Dict[str, str]:
-        """Return the HTTP headers required for authenticated inference requests."""
-        return {
-            "Authorization": f"Bearer {self.api_token}",
+        self._config = config
+        self.endpoint = f"https://api-inference.huggingface.co/models/{self._config.model_name}"
+
+    @property
+    def config(self) -> CommonChunkedHFQGConfigProto:
+        return self._config
+
+    def _run_model(self, prompt: str) -> str:
+        payload = self._call_hf(prompt)
+        text = self._extract_text(payload)
+        return text.strip()
+
+    def _call_hf(self, prompt: str) -> Any:
+        cfg = self._config
+        headers = {
+            "Authorization": f"Bearer {cfg.api_token}",
             "Content-Type": "application/json",
         }
 
-    def _build_prompt(self, data: QGInput) -> str:
-        """Build a compact prompt that instructs the model to generate questions."""
-        keywords = ", ".join(data.keywords[:20]) if data.keywords else ""
-        sentences = "\n".join(f"- {s}" for s in data.sentences[:20])
-
-        return (
-            f"Generate exactly {data.num_questions} clear, non-duplicate questions.\n"
-            f"Return only numbered questions, no explanations.\n\n"
-            f"Topic: {data.topic}\n"
-            f"Title: {data.title or ''}\n"
-            f"Summary: {data.summary or ''}\n"
-            f"Keywords: {keywords}\n"
-            f"Source Sentences:\n{sentences}\n"
-        )
-
-    def _call_hf(self, prompt: str) -> Any:
-        """Send the prompt to the Hugging Face endpoint and return the JSON response."""
         payload = {
             "inputs": prompt,
             "parameters": {
-                "max_new_tokens": self.max_new_tokens,
-                "temperature": self.temperature,
+                "max_new_tokens": cfg.max_new_tokens,
+                "min_new_tokens": cfg.min_new_tokens,
+                "do_sample": cfg.do_sample,
+                "temperature": cfg.temperature,
+                "top_p": cfg.top_p,
+                "num_beams": cfg.num_beams,
                 "return_full_text": False,
             },
             "options": {"wait_for_model": True},
         }
 
-        resp = requests.post(
-            self.url,
-            headers=self._headers(),
+        logger.info("[QG][hf_api] POST model=%s prompt_chars=%d", cfg.model_name, len(prompt))
+
+        response = requests.post(
+            self.endpoint,
+            headers=headers,
             json=payload,
-            timeout=self.timeout,
+            timeout=cfg.timeout,
         )
-        resp.raise_for_status()
-        return resp.json()
 
-    @staticmethod
-    def _extract_text(response_json: Any) -> str:
-        """Extract the generated text from the model response in a backend-agnostic way."""
-        # HF responses vary by model/task
-        if isinstance(response_json, list) and response_json:
-            item = response_json[0]
-            if isinstance(item, dict):
-                if "generated_text" in item:
-                    return str(item["generated_text"])
-                if "summary_text" in item:
-                    return str(item["summary_text"])
-        if isinstance(response_json, dict):
-            if "generated_text" in response_json:
-                return str(response_json["generated_text"])
-            if "error" in response_json:
-                raise RuntimeError(f"HF inference error: {response_json['error']}")
-        return str(response_json)
+        logger.info(
+            "[QG][hf_api] response status=%s content_type=%s",
+            response.status_code,
+            response.headers.get("content-type"),
+        )
 
-    @staticmethod
-    def _parse_questions(text: str, expected: int) -> List[str]:
-        """Parse numbered or bulleted lines from the model output into question strings."""
-        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-        cleaned: List[str] = []
+        response.raise_for_status()
+        try:
+            return response.json()
+        except Exception:
+            return response.text
 
-        # accept numbered or bullet lines
-        for ln in lines:
-            q = re.sub(r"^\s*(?:\d+[\).\-\:]\s*|[-*]\s*)", "", ln).strip()
-            if q.endswith("?") and len(q) > 6:
-                cleaned.append(q)
-            elif len(q.split()) >= 4:
-                # force as question if model forgot '?'
-                cleaned.append(q.rstrip(".") + "?")
+    def _extract_text(self, payload: Any) -> str:
+        if payload is None:
+            logger.warning("[QG][hf_api] extract_text got None payload")
+            return ""
 
-        # de-duplicate while preserving order
-        seen = set()
-        uniq: List[str] = []
-        for q in cleaned:
-            key = q.lower()
-            if key not in seen:
-                seen.add(key)
-                uniq.append(q)
+        if isinstance(payload, str):
+            return payload.strip()
 
-        return uniq[:expected]
+        if isinstance(payload, list):
+            parts: List[str] = []
+            for item in payload:
+                if isinstance(item, str) and item.strip():
+                    parts.append(item.strip())
+                elif isinstance(item, dict):
+                    for key in ("generated_text", "summary_text", "text", "answer"):
+                        value = item.get(key)
+                        if isinstance(value, str) and value.strip():
+                            parts.append(value.strip())
+                            break
+            text = "\n".join(parts).strip()
+            if not text:
+                logger.warning("[QG][hf_api] no text extracted from list payload")
+            return text
 
-    def generate(self, data: QGInput) -> List[str]:
-        """Generate questions for a document summary and its extracted context."""
-        prompt = self._build_prompt(data)
-        raw = self._call_hf(prompt)
-        text = self._extract_text(raw)
-        questions = self._parse_questions(text, expected=data.num_questions)
+        if isinstance(payload, dict):
+            if payload.get("error"):
+                raise RuntimeError(str(payload["error"]))
+            for key in ("generated_text", "summary_text", "text", "answer"):
+                value = payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+            logger.warning("[QG][hf_api] no known text key in dict payload: %r", payload)
+            return ""
 
-        if not questions:
-            # fallback deterministic output
-            questions = [
-                f"What is the main idea of {data.topic}?"
-            ]
-            for kw in data.keywords[: max(0, data.num_questions - 1)]:
-                questions.append(f"How does '{kw}' relate to {data.topic}?")
-
-        return questions[: data.num_questions]
+        logger.warning("[QG][hf_api] unknown payload type: %s", type(payload).__name__)
+        return ""

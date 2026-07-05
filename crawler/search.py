@@ -1,3 +1,5 @@
+# crawler\search.py
+
 """Search and download orchestration for the crawler subsystem.
 
 This module collects results from the configured search backend, filters them
@@ -124,11 +126,24 @@ def _download_candidate(task: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
     url = task["url"]
     _reserve_slot(url)
     try:
-        saved = download_file(url, task["output_path"])
-        dl_meta = {"url": url, "path": saved, "status": "ok"}
-        logger.info("Downloaded %s", saved)
+        saved = download_file(url, task["output_base_path"])
+        dl_meta = {
+            "url": url,
+            "final_url": saved["final_url"],
+            "path": saved["path"],
+            "content_type": saved["content_type"],
+            "bytes": saved["bytes"],
+            "status": "ok",
+        }
+        logger.info("Downloaded %s", saved["path"])
     except Exception as exc:
-        dl_meta = {"url": url, "path": None, "status": "error", "reason": str(exc)}
+        dl_meta = {
+            "url": url,
+            "path": None,
+            "content_type": None,
+            "status": "error",
+            "reason": str(exc),
+        }
         logger.error("Download failed for %s: %s", url, exc)
 
     payload = {
@@ -138,6 +153,7 @@ def _download_candidate(task: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
         "download": dl_meta,
     }
     return task["index"], payload
+
 
 
 def run_search(query: str, max_results: int = 10) -> List[Dict[str, Any]]:
@@ -178,8 +194,8 @@ def run_search(query: str, max_results: int = 10) -> List[Dict[str, Any]]:
         snippet = item.get("snippet")
         title_slug = slugify(title, fallback=f"result-{idx}")
         domain_slug = slugify(urlparse(norm).netloc.split(":")[0])
-        filename = f"{timestamp_slug()}_{domain_slug}_{title_slug}.html"
-        out_path = os.path.join(DOWNLOAD_DIR, filename)
+        base_name = f"{timestamp_slug()}_{domain_slug}_{title_slug}"
+        output_base_path = os.path.join(DOWNLOAD_DIR, base_name)
 
         tasks.append(
             {
@@ -188,9 +204,10 @@ def run_search(query: str, max_results: int = 10) -> List[Dict[str, Any]]:
                 "snippet": snippet,
                 "search_link": link,
                 "url": norm,
-                "output_path": out_path,
+                "output_base_path": output_base_path,
             }
         )
+
 
     if not tasks:
         logger.info("No download candidates after filtering.")

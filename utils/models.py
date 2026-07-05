@@ -1,3 +1,4 @@
+# utils\models.py
 """Core data models used throughout the pipeline.
 
 These dataclasses describe documents, extraction results, questions, and the

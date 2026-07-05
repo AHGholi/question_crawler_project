@@ -1,3 +1,4 @@
+# processor\similarity.py
 """Similarity helpers for comparing document vectors.
 
 This module provides basic cosine-similarity operations that the ranking and

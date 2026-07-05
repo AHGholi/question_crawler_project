@@ -1,3 +1,4 @@
+# processor\sentence_ranking.py
 """Sentence-level ranking for selecting the most important passages from extracted text.
 
 This module scores and filters candidate sentences so the question-generation

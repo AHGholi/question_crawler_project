@@ -1,3 +1,4 @@
+# extractor\doc_extractor.py
 """Word document extraction support for .doc and .docx files.
 
 The extractor reads paragraphs and tables from Microsoft Word documents and
@@ -76,12 +77,12 @@ class DOCDocxExtractor(BaseExtractor):
         raw_text = "\n".join(chunks)
         cleaned_text = clean_text(raw_text)
 
-        if document.metadata is not None:
-            document.metadata["extraction_method"] = method
+        document.metadata["extraction_method"] = method
         if ext:
             document.metadata["source_extension"] = ext.lstrip(".")
         else:
             document.metadata.pop("source_extension", None)
+
 
 
 

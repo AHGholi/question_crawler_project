@@ -1,3 +1,5 @@
+# extractor\pdf_extractor.py
+
 """PDF extraction support for the document pipeline.
 
 The extractor attempts to read text from PDFs using the available PDF library
@@ -116,18 +118,13 @@ class PDFExtractor(BaseExtractor):
         cleaned: str,
         method: str,
     ) -> ExtractionResult:
-        fields = getattr(ExtractionResult, "__dataclass_fields__", {})
-        kwargs: Dict[str, object] = {
-            "document": document,
-            "raw_text": raw_text,
-            "clean_text": cleaned,
-        }
-        metadata = {"extraction_method": method}
-        if "metadata" in fields:
-            kwargs["metadata"] = metadata
-        elif "meta" in fields:
-            kwargs["meta"] = metadata
-        return ExtractionResult(**kwargs)  # type: ignore[arg-type]
+        document.metadata["extraction_method"] = method
+        return ExtractionResult(
+            document=document,
+            raw_text=raw_text,
+            clean_text=cleaned,
+        )
+
 
 
 

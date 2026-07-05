@@ -1,3 +1,4 @@
+# question_generator\base.py
 """Core abstractions for the question-generation subsystem.
 
 The classes in this module define the input payload passed to question
