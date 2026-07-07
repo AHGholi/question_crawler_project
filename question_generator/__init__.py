@@ -1,3 +1,4 @@
+# question_generator\__init__.py
 """Public exports for the question-generation package."""
 
 from .base import QGBackend, QGInput

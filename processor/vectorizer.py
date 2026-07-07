@@ -35,24 +35,3 @@ class TextVectorizer:
     def get_feature_names(self) -> List[str]:
         """Return the learned vocabulary terms used by the vectorizer."""
         return self.vectorizer.get_feature_names_out().tolist()
-
-    def extract_top_keywords(
-        self,
-        tfidf_matrix,
-        top_k: int = 10,
-    ) -> List[List[Tuple[str, float]]]:
-        """Extract the highest-scoring keywords for each document vector row."""
-        feature_names = self.get_feature_names()
-        results: List[List[Tuple[str, float]]] = []
-
-        for row in tfidf_matrix:
-            scores = row.toarray().flatten()
-            top_indices = scores.argsort()[::-1][:top_k]
-            keywords = [
-                (feature_names[i], float(scores[i]))
-                for i in top_indices
-                if scores[i] > 0
-            ]
-            results.append(keywords)
-
-        return results
